@@ -17,14 +17,13 @@ import {
   canAssignPooling,
   canAssignShift,
   defaultSlotTypeForDate,
-  labelForAssociate,
   SLOT_TYPES,
   weekdayFromYmd,
 } from "@/lib/shift-scheduling";
 import { ConfigBanner } from "@/components/dashboard/config-banner";
 import { FormLabel } from "@/components/dashboard/status-pill";
 
-type TabId = "shift" | "associates" | "pooling" | "backup";
+type TabId = "shift" | "associates" | "pooling";
 const POOLING_SHIFT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time"];
 
 function buildWeeks(days: { date: string; weekday: number; label: string }[]) {
@@ -47,9 +46,6 @@ function assignmentMap(rows: MonthlyAssignmentRow[]) {
   return m;
 }
 
-function associateById(list: AssociateRow[]) {
-  return new Map(list.map((a) => [a.id, a]));
-}
 
 export function ShiftManagerPanel({
   ym,
@@ -73,10 +69,8 @@ export function ShiftManagerPanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [confirmOverwrite, setConfirmOverwrite] = useState(false);
 
   const byAssign = useMemo(() => assignmentMap(assignments), [assignments]);
-  const byAssoc = useMemo(() => associateById(associates), [associates]);
   const ruleByAssoc = useMemo(() => new Map(rules.map((r) => [r.associate_id, r])), [rules]);
   const weeks = useMemo(() => buildWeeks(monthDays), [monthDays]);
 
@@ -108,19 +102,14 @@ export function ShiftManagerPanel({
     });
   };
 
-  const onAutoAssign = (overwrite: boolean) => {
+  const onAutoAssign = () => {
     if (!hasSupabase) { setError("Configure Supabase to auto-assign."); return; }
     setError(null);
     setSuccess(null);
     startTransition(async () => {
-      const res = await autoAssignMonthly(ym, overwrite);
-      if (!res.ok) {
-        if (res.error.includes("already exists")) { setConfirmOverwrite(true); return; }
-        setError(res.error);
-        return;
-      }
-      setConfirmOverwrite(false);
-      setSuccess(`Generated ${res.created} assignment rows for ${ym}.`);
+      const res = await autoAssignMonthly(ym);
+      if (!res.ok) { setError(res.error); return; }
+      setSuccess(`Schedule generated for ${ym}.`);
       router.refresh();
     });
   };
@@ -128,7 +117,6 @@ export function ShiftManagerPanel({
   const leftTabs: { id: TabId; label: string }[] = [
     { id: "shift", label: "Shift Scheduling" },
     { id: "pooling", label: "Pooling" },
-    { id: "backup", label: "Backup Associates" },
   ];
 
   return (
@@ -207,40 +195,21 @@ export function ShiftManagerPanel({
             <button
               type="button"
               disabled={pending}
-              onClick={() => onAutoAssign(false)}
+              onClick={() => onAutoAssign()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-sky-700 disabled:opacity-60"
             >
-              Auto Assign Monthly
+              {pending ? "Generating…" : "Auto Assign Monthly"}
             </button>
           ) : null}
         </div>
       </div>
 
-      {confirmOverwrite ? (
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          <p className="font-medium">This month already has saved assignments.</p>
-          <p className="mt-1">Overwrite and regenerate the full month?</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium border border-slate-200" onClick={() => setConfirmOverwrite(false)}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              disabled={pending}
-              className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white"
-              onClick={() => onAutoAssign(true)}
-            >
-              Overwrite &amp; regenerate
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {tab === "shift" ? (
         <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
           <div className="border-b border-slate-200/80 px-4 py-3">
             <h3 className="text-sm font-bold text-slate-900">Monthly Schedule</h3>
-            <p className="text-xs text-slate-500">Manual MAIN + BACKUP per day. Saved to your database — navigate months freely.</p>
+            <p className="text-xs text-slate-500">One associate per day, pulled from Pooling rules. Saved to your database — navigate months freely.</p>
           </div>
           <div className="overflow-x-auto p-3">
             <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
@@ -254,40 +223,22 @@ export function ShiftManagerPanel({
                   if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[120px] rounded-lg bg-slate-50/50" />;
                   const date = cell.date;
                   const mainRow = byAssign.get(`${date}::main`);
-                  const backupRow = byAssign.get(`${date}::backup`);
                   const slot = mainRow?.slot_type ?? defaultSlotTypeForDate(date);
                   const mainId = mainRow?.associate_id ?? "";
-                  const backupId = backupRow?.associate_id ?? "";
                   const mainOpts = eligibleOptions(date, slot, "main", []);
-                  const backupOpts = eligibleOptions(date, slot, "backup", mainId ? [mainId] : []);
 
                   return (
                     <div key={date} className="min-h-[120px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
                       <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
                       <div className="mt-1">
-                        <FormLabel>MAIN</FormLabel>
                         <select
-                          className="w-full rounded border border-slate-200 bg-white px-1 py-1 text-[0.7rem]"
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-slate-800 focus:outline-none"
                           value={mainId}
                           disabled={pending || slot === "Vacation"}
                           onChange={(e) => onSlotOrAssign(date, "main", slot, e.target.value || null)}
                         >
                           <option value="">—</option>
                           {mainOpts.map((a) => (
-                            <option key={a.id} value={a.id}>{a.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div className="mt-1 border-t border-slate-200/60 pt-1">
-                        <FormLabel>BACKUP</FormLabel>
-                        <select
-                          className="w-full rounded border border-slate-200 bg-white px-1 py-1 text-[0.7rem]"
-                          value={backupId}
-                          disabled={pending || slot === "Vacation"}
-                          onChange={(e) => onSlotOrAssign(date, "backup", slot, e.target.value || null)}
-                        >
-                          <option value="">—</option>
-                          {backupOpts.map((a) => (
                             <option key={a.id} value={a.id}>{a.name}</option>
                           ))}
                         </select>
@@ -437,9 +388,47 @@ export function ShiftManagerPanel({
       {tab === "pooling" ? (
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-            <div className="border-b border-slate-200/80 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-900">Pooling rules</h3>
-              <p className="text-xs text-slate-500">Set shift type and available workdays for pooling assignments.</p>
+            <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Pooling rules</h3>
+                <p className="text-xs text-slate-500">Set shift type and available workdays for pooling assignments.</p>
+              </div>
+              <button
+                type="button"
+                disabled={pending}
+                className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                onClick={() => {
+                  setError(null);
+                  setSuccess(null);
+                  startTransition(async () => {
+                    for (const a of associates) {
+                      const shift_type = (document.getElementById(`pool-shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
+                      const assocRes = await updateAssociate({
+                        id: a.id,
+                        name: a.name,
+                        shift_type,
+                        is_active: a.is_active,
+                      });
+                      if (!assocRes.ok) { setError(assocRes.error); return; }
+                      const ruleRes = await upsertPoolingRule({
+                        associate_id: a.id,
+                        allow_sunday: (document.getElementById(`sun-${a.id}`) as HTMLInputElement).checked,
+                        allow_monday: (document.getElementById(`mon-${a.id}`) as HTMLInputElement).checked,
+                        allow_tuesday: (document.getElementById(`tue-${a.id}`) as HTMLInputElement).checked,
+                        allow_wednesday: (document.getElementById(`wed-${a.id}`) as HTMLInputElement).checked,
+                        allow_thursday: (document.getElementById(`thu-${a.id}`) as HTMLInputElement).checked,
+                        allow_friday: (document.getElementById(`fri-${a.id}`) as HTMLInputElement).checked,
+                        allow_saturday: (document.getElementById(`sat-${a.id}`) as HTMLInputElement).checked,
+                      });
+                      if (!ruleRes.ok) { setError(ruleRes.error); return; }
+                    }
+                    setSuccess("All pooling rules saved.");
+                    router.refresh();
+                  });
+                }}
+              >
+                {pending ? "Saving…" : "Save"}
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -454,7 +443,6 @@ export function ShiftManagerPanel({
                     <th className="px-4 py-2">Thursday</th>
                     <th className="px-4 py-2">Friday</th>
                     <th className="px-4 py-2">Saturday</th>
-                    <th className="px-4 py-2" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/80">
@@ -491,43 +479,6 @@ export function ShiftManagerPanel({
                         <td className="px-4 py-2">
                           <input type="checkbox" defaultChecked={r?.allow_saturday} id={`sat-${a.id}`} />
                         </td>
-                        <td className="px-4 py-2 text-right">
-                          <button
-                            type="button"
-                            className="text-sky-700 hover:underline"
-                            disabled={pending}
-                            onClick={() => {
-                              setError(null);
-                              startTransition(async () => {
-                                const shift_type = (document.getElementById(`pool-shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
-                                const associateUpdate = await updateAssociate({
-                                  id: a.id,
-                                  name: a.name,
-                                  shift_type,
-                                  is_active: a.is_active,
-                                });
-                                if (!associateUpdate.ok) {
-                                  setError(associateUpdate.error);
-                                  return;
-                                }
-                                const res = await upsertPoolingRule({
-                                  associate_id: a.id,
-                                  allow_sunday: (document.getElementById(`sun-${a.id}`) as HTMLInputElement).checked,
-                                  allow_monday: (document.getElementById(`mon-${a.id}`) as HTMLInputElement).checked,
-                                  allow_tuesday: (document.getElementById(`tue-${a.id}`) as HTMLInputElement).checked,
-                                  allow_wednesday: (document.getElementById(`wed-${a.id}`) as HTMLInputElement).checked,
-                                  allow_thursday: (document.getElementById(`thu-${a.id}`) as HTMLInputElement).checked,
-                                  allow_friday: (document.getElementById(`fri-${a.id}`) as HTMLInputElement).checked,
-                                  allow_saturday: (document.getElementById(`sat-${a.id}`) as HTMLInputElement).checked,
-                                });
-                                if (!res.ok) setError(res.error);
-                                else router.refresh();
-                              });
-                            }}
-                          >
-                            Save
-                          </button>
-                        </td>
                       </tr>
                     );
                   })}
@@ -536,114 +487,9 @@ export function ShiftManagerPanel({
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-            <div className="border-b border-slate-200/80 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-900">Pooling assignments (month)</h3>
-              <p className="text-xs text-slate-500">Uses the same eligibility rules as Shift Scheduling for the POOLING role.</p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-                  <tr>
-                    <th className="px-4 py-2">Date</th>
-                    <th className="px-4 py-2">Slot</th>
-                    <th className="px-4 py-2">Pooling</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/80">
-                  {monthDays.map((d) => {
-                    const mainRow = byAssign.get(`${d.date}::main`);
-                    const poolRow = byAssign.get(`${d.date}::pooling`);
-                    const slot = mainRow?.slot_type ?? defaultSlotTypeForDate(d.date);
-                    const poolId = poolRow?.associate_id ?? "";
-                    const mainId = mainRow?.associate_id ?? "";
-                    const opts = eligibleOptions(d.date, slot, "pooling", mainId ? [mainId] : []);
-
-                    return (
-                      <tr key={`pool-${d.date}`}>
-                        <td className="px-4 py-2">{d.label}</td>
-                        <td className="px-4 py-2">{slot}</td>
-                        <td className="px-4 py-2">
-                          <select
-                            className="w-full max-w-xs rounded border border-slate-200 px-2 py-1"
-                            value={poolId}
-                            disabled={pending || slot === "Vacation"}
-                            onChange={(e) => onSlotOrAssign(d.date, "pooling", slot, e.target.value || null)}
-                          >
-                            <option value="">—</option>
-                            {opts.map((a) => (
-                              <option key={a.id} value={a.id}>{a.name}</option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       ) : null}
 
-      {tab === "backup" ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-          <div className="border-b border-slate-200/80 px-4 py-3">
-            <h3 className="text-sm font-bold text-slate-900">Daily backups</h3>
-            <p className="text-xs text-slate-500">MAIN is shown above BACKUP for each day (same rules as Shift Scheduling).</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-                <tr>
-                  <th className="px-4 py-2">Date</th>
-                  <th className="px-4 py-2">Day</th>
-                  <th className="px-4 py-2">Main</th>
-                  <th className="px-4 py-2">Backup</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200/80">
-                {monthDays.map((d) => {
-                  const mainRow = byAssign.get(`${d.date}::main`);
-                  const backupRow = byAssign.get(`${d.date}::backup`);
-                  const slot = mainRow?.slot_type ?? defaultSlotTypeForDate(d.date);
-                  const mainA = mainRow?.associate_id ? byAssoc.get(mainRow.associate_id) : undefined;
-                  const backupId = backupRow?.associate_id ?? "";
-                  const opts = eligibleOptions(d.date, slot, "backup", mainA ? [mainA.id] : []);
-
-                  return (
-                    <tr key={d.date}>
-                      <td className="px-4 py-2 text-slate-700">{d.date}</td>
-                      <td className="px-4 py-2 text-slate-600">{d.label}</td>
-                      <td className="px-4 py-2">
-                        <div className="font-medium text-slate-800">
-                          {mainA ? labelForAssociate(mainA, mainA.name) : <span className="text-slate-400">—</span>}
-                        </div>
-                        <div className="text-xs text-slate-500">Slot: {slot}</div>
-                      </td>
-                      <td className="px-4 py-2">
-                        <select
-                          className="w-full max-w-xs rounded border border-slate-200 px-2 py-1"
-                          value={backupId}
-                          disabled={pending || slot === "Vacation"}
-                          onChange={(e) => onSlotOrAssign(d.date, "backup", slot, e.target.value || null)}
-                        >
-                          <option value="">—</option>
-                          {opts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name} ({a.shift_type})
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
