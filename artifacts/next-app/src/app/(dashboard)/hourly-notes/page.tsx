@@ -1,0 +1,85 @@
+import { Suspense } from "react";
+import { PageHero } from "@/components/dashboard/page-hero";
+import { HourlyNotesPanel } from "@/components/dashboard/hourly-notes-panel";
+import { toDateStringLocal } from "@/lib/hourly-notes-logic";
+import { getHourlyNotesForDate, isSupabaseConfigured } from "@/lib/data/queries";
+
+function defaultDate() {
+  return toDateStringLocal(new Date());
+}
+
+function PanelFallback() {
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-6 shadow-sm">
+      <p className="text-sm text-slate-500">Loading hourly notes…</p>
+    </div>
+  );
+}
+
+function DbSetupBanner({ message }: { message: string }) {
+  const isSchemaCache = message.includes("schema cache") || message.includes("hourly_notes");
+  return (
+    <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 shadow-sm">
+      <p className="font-semibold mb-1">Database setup required</p>
+      {isSchemaCache ? (
+        <>
+          <p className="mb-2">
+            The <strong>hourly_notes</strong> table does not exist yet in your database. Open your{" "}
+            <strong>Supabase project → SQL Editor</strong>, paste and run the SQL below, then refresh this page:
+          </p>
+          <pre className="overflow-x-auto rounded-lg bg-amber-100 px-4 py-3 font-mono text-xs leading-relaxed text-amber-900">
+{`CREATE TABLE IF NOT EXISTS hourly_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  note_date DATE NOT NULL,
+  hour INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  content TEXT NOT NULL DEFAULT '',
+  author_name TEXT NOT NULL DEFAULT 'ICQA Team',
+  manager_comment TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (note_date, hour)
+);
+
+NOTIFY pgrst, 'reload schema';`}
+          </pre>
+        </>
+      ) : (
+        <p>{message}</p>
+      )}
+    </div>
+  );
+}
+
+export default async function HourlyNotesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string }>;
+}) {
+  const sp = await searchParams;
+  const date = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : defaultDate();
+  const { rows, error } = await getHourlyNotesForDate(date);
+  const hasConfig = isSupabaseConfigured();
+
+  const dbError = error && error !== "missing_config" ? error : null;
+  const hasSupabase = hasConfig && !dbError;
+
+  return (
+    <>
+      <PageHero
+        kicker="Hourly Associate Feedback and Concern"
+        title="ICQA Dashboard"
+        pill="Hourly Notes"
+      />
+      {dbError ? <DbSetupBanner message={dbError} /> : null}
+      <Suspense fallback={<PanelFallback />}>
+        <HourlyNotesPanel
+          key={date}
+          initialDate={date}
+          rows={rows}
+          hasSupabase={hasSupabase}
+        />
+      </Suspense>
+    </>
+  );
+}

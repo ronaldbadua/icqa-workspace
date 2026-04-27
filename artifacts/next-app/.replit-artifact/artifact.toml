@@ -1,0 +1,39 @@
+kind = "web"
+previewPath = "/"
+title = "ICQA Workspace"
+version = "1.0.0"
+id = "artifacts/next-app"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22610
+
+[services.development]
+run = "pnpm --filter @workspace/next-app run dev"
+
+[services.production]
+
+[services.production.build]
+args = ["pnpm", "--filter", "@workspace/next-app", "run", "build"]
+
+[services.production.build.env]
+NODE_ENV = "production"
+
+[services.production.run]
+args = ["pnpm", "--filter", "@workspace/next-app", "run", "start"]
+
+[services.production.run.env]
+PORT = "22610"
+NODE_ENV = "production"
+
+[services.production.health.startup]
+path = "/api/health"
+
+[services.env]
+PORT = "22610"
