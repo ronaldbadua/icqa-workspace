@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { createAdminSupabaseClient, createServerSupabaseClient } from "@/lib/supabase/server";
 import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 import {
-  canAssignDay,
   canAssignPooling,
   canAssignShift,
   defaultSlotTypeForDate,
@@ -175,15 +174,14 @@ function pickBalanced(candidates: { id: string }[], load: Map<string, number>) {
 }
 
 export async function autoAssignMonthly(
-  ym: string,
-  overwriteExisting: boolean
+  ym: string
 ): Promise<{ ok: true; created: number } | { ok: false; error: string }> {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
 
   const { start, end } = monthBounds(ym);
 
-  const [{ data: associates, error: assocErr }, { data: rules, error: ruleErr }, { data: existing, error: existingErr }] =
+  const [{ data: associates, error: assocErr }, { data: rules, error: ruleErr }] =
     await Promise.all([
       supabase.from("associates").select("id, name, shift_type, is_active").eq("is_active", true),
       supabase
@@ -191,15 +189,10 @@ export async function autoAssignMonthly(
         .select(
           "associate_id, allow_sunday, allow_monday, allow_tuesday, allow_wednesday, allow_thursday, allow_friday, allow_saturday"
         ),
-      supabase.from("monthly_assignments").select("id").gte("assignment_date", start).lte("assignment_date", end).limit(1),
     ]);
 
-  if (assocErr || ruleErr || existingErr) {
-    return { ok: false, error: assocErr?.message ?? ruleErr?.message ?? existingErr?.message ?? "Failed to load data." };
-  }
-
-  if ((existing?.length ?? 0) > 0 && !overwriteExisting) {
-    return { ok: false, error: "Monthly schedule already exists for that month. Confirm overwrite to regenerate." };
+  if (assocErr || ruleErr) {
+    return { ok: false, error: assocErr?.message ?? ruleErr?.message ?? "Failed to load data." };
   }
 
   const active = (associates ?? []).filter((a) => a.shift_type !== "Vacation");
@@ -207,14 +200,13 @@ export async function autoAssignMonthly(
     return { ok: false, error: "Add at least one active associate who is not on Vacation." };
   }
 
-  if (overwriteExisting || (existing?.length ?? 0) > 0) {
-    const { error: delErr } = await supabase
-      .from("monthly_assignments")
-      .delete()
-      .gte("assignment_date", start)
-      .lte("assignment_date", end);
-    if (delErr) return { ok: false, error: delErr.message };
-  }
+  // Always clear and regenerate the full month
+  const { error: delErr } = await supabase
+    .from("monthly_assignments")
+    .delete()
+    .gte("assignment_date", start)
+    .lte("assignment_date", end);
+  if (delErr) return { ok: false, error: delErr.message };
 
   const [sy, sm] = ym.split("-").map(Number);
   const daysInMonth = new Date(sy, sm, 0).getDate();
@@ -227,8 +219,6 @@ export async function autoAssignMonthly(
 
   const rulesByAssociate = new Map((rules ?? []).map((r) => [r.associate_id, r]));
   const mainLoad = new Map<string, number>();
-  const poolingLoad = new Map<string, number>();
-  const backupLoad = new Map<string, number>();
 
   const rows: {
     assignment_date: string;
@@ -237,62 +227,25 @@ export async function autoAssignMonthly(
     associate_id: string | null;
   }[] = [];
 
-  // Weekend fallback: any associate of the correct shift type for the day
-  // ignoring day flags — used only when day-flag-aware tiers yield no candidates.
-  const weekendFallback = (weekday: number) =>
-    active.filter((a) => {
-      if (weekday === 0) return a.shift_type === "FHD";
-      if (weekday === 6) return a.shift_type === "BHD";
-      return false;
-    });
+  const DAY_FLAG_KEYS = [
+    "allow_sunday", "allow_monday", "allow_tuesday", "allow_wednesday",
+    "allow_thursday", "allow_friday", "allow_saturday",
+  ] as const;
 
   for (const day of days) {
-    const isEligibleForDay = (a: typeof active[0]) =>
-      canAssignDay(
-        { id: a.id, shift_type: a.shift_type as ShiftType, is_active: true },
-        rulesByAssociate.get(a.id),
-        day.slotType,
-        day.weekday
-      );
+    const dayFlagKey = DAY_FLAG_KEYS[day.weekday];
 
-    let eligibleMain = active.filter(isEligibleForDay);
-    // Weekend Tier 4 for MAIN: fall back to any eligible FHD (Sun) or BHD (Sat)
-    if (!eligibleMain.length && (day.weekday === 0 || day.weekday === 6)) {
-      eligibleMain = weekendFallback(day.weekday);
-    }
-    const mainId = pickBalanced(eligibleMain, mainLoad);
+    // Tier 1: associates who have this specific day checked in Pooling rules
+    let pool = active.filter((a) => rulesByAssociate.get(a.id)?.[dayFlagKey] === true);
 
-    const eligiblePooling = active.filter((a) => {
-      if (a.id === mainId) return false;
-      const rule = rulesByAssociate.get(a.id);
-      return canAssignPooling(
-        { id: a.id, shift_type: a.shift_type as ShiftType, is_active: true },
-        rule,
-        day.slotType,
-        day.weekday
-      );
-    });
-    const poolingId = pickBalanced(eligiblePooling, poolingLoad);
+    // Tier 2: if nobody has that day checked, fall back to entire active list
+    // This guarantees EVERY day — including Sundays & Saturdays — is always filled
+    if (pool.length === 0) pool = active.slice();
 
-    // Tier 1: exclude both main and pooling (ideal)
-    let eligibleBackup = active.filter((a) => a.id !== mainId && a.id !== poolingId && isEligibleForDay(a));
-    // Tier 2: if no one left, allow reusing the pooling associate
-    if (!eligibleBackup.length) {
-      eligibleBackup = active.filter((a) => a.id !== mainId && isEligibleForDay(a));
-    }
-    // Tier 3: allow Part Time to be used twice (any eligible, including main)
-    if (!eligibleBackup.length) {
-      eligibleBackup = active.filter(isEligibleForDay);
-    }
-    // Tier 4 (weekends only): ignore day flags — any FHD (Sunday) or BHD (Saturday)
-    if (!eligibleBackup.length && (day.weekday === 0 || day.weekday === 6)) {
-      eligibleBackup = weekendFallback(day.weekday);
-    }
-    const backupId = pickBalanced(eligibleBackup, backupLoad);
+    // Hard guarantee: pick someone (extra safety net)
+    const picked = pickBalanced(pool, mainLoad) ?? active[0].id;
 
-    rows.push({ assignment_date: day.date, role: "main", slot_type: day.slotType, associate_id: mainId });
-    rows.push({ assignment_date: day.date, role: "pooling", slot_type: day.slotType, associate_id: poolingId });
-    rows.push({ assignment_date: day.date, role: "backup", slot_type: day.slotType, associate_id: backupId });
+    rows.push({ assignment_date: day.date, role: "main", slot_type: day.slotType, associate_id: picked });
   }
 
   const { error: upsertErr } = await supabase.from("monthly_assignments").upsert(rows, { onConflict: "assignment_date,role" });
