@@ -9,6 +9,7 @@ const items = [
   { href: "/hourly-notes", label: "Hourly Notes" },
   { href: "/chat", label: "Chat Thread" },
   { href: "/scheduling", label: "Scheduling" },
+  { href: "/associate-table", label: "Associate Table" },
   { href: "/process-path", label: "Process Path" },
   { href: "/database", label: "Database" },
 ];
