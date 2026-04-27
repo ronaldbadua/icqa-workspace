@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createProcessItem, deleteProcessItem, updateProcessItem } from "@/app/actions/process-path";
+import { deleteProcessItem, updateProcessItem } from "@/app/actions/process-path";
 import type { ProcessRow } from "@/lib/data/queries";
 import type { ProcessStage } from "@/lib/supabase/database.types";
 import { ConfigBanner } from "@/components/dashboard/config-banner";
@@ -33,28 +33,6 @@ export function ProcessPathPanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ProcessRow | null>(null);
-
-  const onCreate = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!hasSupabase) {
-      setError("Configure Supabase to create items.");
-      return;
-    }
-    const fd = new FormData(e.currentTarget);
-    const title = String(fd.get("title") || "");
-    const detail = String(fd.get("detail") || "");
-    const stage = String(fd.get("stage") || "pending") as ProcessStage;
-    setError(null);
-    startTransition(async () => {
-      const res = await createProcessItem({ title, detail, stage });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      (e.target as HTMLFormElement).reset();
-      router.refresh();
-    });
-  };
 
   const onUpdate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -159,21 +137,21 @@ export function ProcessPathPanel({
         })}
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-bold text-slate-900">Add process item</h3>
-          <form onSubmit={onCreate} className="mt-3 space-y-3">
+      {editing ? (
+        <div className="mt-6 max-w-md overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-900">Edit process item</h3>
+          <form key={editing.id} onSubmit={onUpdate} className="mt-3 space-y-3">
             <div>
               <FormLabel>Title</FormLabel>
-              <input name="title" required className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" />
+              <input name="title" required className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue={editing.title} />
             </div>
             <div>
               <FormLabel>Detail</FormLabel>
-              <textarea name="detail" rows={3} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" />
+              <textarea name="detail" rows={3} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue={editing.detail} />
             </div>
             <div>
               <FormLabel>Stage</FormLabel>
-              <select name="stage" className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue="pending">
+              <select name="stage" className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue={editing.stage}>
                 {stages.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.label}
@@ -181,60 +159,25 @@ export function ProcessPathPanel({
                 ))}
               </select>
             </div>
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                onClick={() => setEditing(null)}
+              >
+                Cancel
+              </button>
               <button
                 type="submit"
                 className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
                 disabled={pending}
               >
-                Add
+                Save
               </button>
             </div>
           </form>
         </div>
-
-        {editing ? (
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900">Edit process item</h3>
-            <form key={editing.id} onSubmit={onUpdate} className="mt-3 space-y-3">
-              <div>
-                <FormLabel>Title</FormLabel>
-                <input name="title" required className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue={editing.title} />
-              </div>
-              <div>
-                <FormLabel>Detail</FormLabel>
-                <textarea name="detail" rows={3} className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue={editing.detail} />
-              </div>
-              <div>
-                <FormLabel>Stage</FormLabel>
-                <select name="stage" className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue={editing.stage}>
-                  {stages.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="flex flex-wrap justify-end gap-2">
-                <button
-                  type="button"
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                  onClick={() => setEditing(null)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-                  disabled={pending}
-                >
-                  Save
-                </button>
-              </div>
-            </form>
-          </div>
-        ) : null}
-      </div>
+      ) : null}
     </div>
   );
 }
