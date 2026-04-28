@@ -70,6 +70,7 @@ export function summarizeHourlyStatus(slots: HourlySlot[]) {
   let resolved = 0;
   let pending = 0;
   let needsAttention = 0;
+  let noActionNeeded = 0;
   let totalLogged = 0;
 
   for (const s of slots) {
@@ -85,7 +86,10 @@ export function summarizeHourlyStatus(slots: HourlySlot[]) {
       case "needs_attention":
         needsAttention += 1;
         break;
+      case "no_action_needed":
+        noActionNeeded += 1;
+        break;
     }
   }
-  return { resolved, pending, needsAttention, totalLogged };
+  return { resolved, pending, needsAttention, noActionNeeded, totalLogged };
 }
