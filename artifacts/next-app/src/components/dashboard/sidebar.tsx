@@ -12,6 +12,7 @@ const items = [
   { href: "/associate-table", label: "Associate Table" },
   { href: "/process-path", label: "Process Path" },
   { href: "/database", label: "Database" },
+  { href: "/staffing", label: "Staffing" },
 ];
 
 const HIDE_DELAY_MS = 1500;
