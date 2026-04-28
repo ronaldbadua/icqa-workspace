@@ -195,9 +195,15 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
               <li key={slot.hour} className={rowTone}>
                 <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="min-w-[5.5rem] text-sm font-semibold text-slate-800">
-                      {formatHourLabel(slot.hour)}
-                    </span>
+                    {slot.hour === 6 || slot.hour === STAND_UP_2_HOUR ? (
+                      <span className="text-[2.2rem] font-bold text-blue-600 leading-none">
+                        {formatHourLabel(slot.hour)}
+                      </span>
+                    ) : (
+                      <span className="min-w-[5.5rem] text-sm font-semibold text-slate-800">
+                        {formatHourLabel(slot.hour)}
+                      </span>
+                    )}
                     <HourlyRowStatusBadge status={slot.status} />
                     {isSaved ? (
                       <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
