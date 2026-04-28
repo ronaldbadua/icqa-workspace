@@ -103,6 +103,15 @@ export async function getChatMessages(limit = 200) {
   return { messages: (data ?? []) as ChatMessage[], error: null };
 }
 
+export async function getDatabaseEntry(id: string) {
+  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
+  if (!supabase) return { entry: null, error: "missing_config" as const };
+  const { getDatabaseEntryById } = await import("@/lib/services/database-entries");
+  const { data, error } = await getDatabaseEntryById(supabase, id);
+  if (error) return { entry: null, error };
+  return { entry: data, error: null };
+}
+
 export async function getDatabaseEntries() {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) {
