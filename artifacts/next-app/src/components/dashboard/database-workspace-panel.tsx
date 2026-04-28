@@ -1,78 +1,72 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   createDatabaseEntryAction,
   deleteDatabaseEntryAction,
-  importDocxChunksAction,
   updateDatabaseEntryAction,
+  importFromDocxAction,
 } from "@/app/actions/database";
 import type { DatabaseEntryRow } from "@/lib/data/queries";
 import { ConfigBanner } from "@/components/dashboard/config-banner";
 import { FormLabel } from "@/components/dashboard/status-pill";
 
-function formatDataPreview(data: unknown) {
-  try {
-    return JSON.stringify(data, null, 2);
-  } catch {
-    return String(data);
-  }
-}
+const SETUP_SQL = `-- Run this in your Supabase SQL Editor
+CREATE TABLE IF NOT EXISTS public.database_entries (
+  id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  label text NOT NULL DEFAULT '',
+  notes text NOT NULL DEFAULT '',
+  data jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL
+);
 
-function getContentFromData(data: DatabaseEntryRow["data"]): string | null {
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    const c = (data as Record<string, unknown>).content;
-    if (typeof c === "string" && c.trim()) return c;
-  }
-  return null;
-}
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN NEW.updated_at = now(); RETURN NEW; END; $$;
 
-function getRowSearchableText(row: DatabaseEntryRow): string {
-  const body = getContentFromData(row.data);
-  if (body) {
-    return `${row.label}\n${row.notes}\n${body}`;
-  }
-  return `${row.label}\n${row.notes}\n${formatDataPreview(row.data)}`;
-}
+DROP TRIGGER IF EXISTS database_entries_updated_at ON public.database_entries;
+CREATE TRIGGER database_entries_updated_at
+  BEFORE UPDATE ON public.database_entries
+  FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
-function buildMatchSnippet(haystack: string, query: string): string | null {
-  const q = query.trim();
-  if (!q) return null;
-  const lower = haystack.toLowerCase();
-  const idx = lower.indexOf(q.toLowerCase());
-  if (idx === -1) return null;
-  const padBefore = 140;
-  const padAfter = 260;
-  const start = Math.max(0, idx - padBefore);
-  const end = Math.min(haystack.length, idx + q.length + padAfter);
-  let out = haystack.slice(start, end).replace(/\s+/g, " ").trim();
-  if (start > 0) out = `…${out}`;
-  if (end < haystack.length) out = `${out}…`;
-  return out;
-}
+ALTER TABLE public.database_entries ENABLE ROW LEVEL SECURITY;
 
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+CREATE POLICY IF NOT EXISTS allow_all_authenticated ON public.database_entries
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
-function HighlightText({ text, query }: { text: string; query: string }) {
-  const q = query.trim();
-  if (!q) return <>{text}</>;
-  const parts = text.split(new RegExp(`(${escapeRegExp(q)})`, "gi"));
+CREATE POLICY IF NOT EXISTS allow_service_role ON public.database_entries
+  FOR ALL TO service_role USING (true) WITH CHECK (true);`;
+
+function highlight(text: string, query: string) {
+  if (!query.trim()) return <>{text}</>;
+  const parts = text.split(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
   return (
     <>
       {parts.map((part, i) =>
-        part.toLowerCase() === q.toLowerCase() ? (
-          <mark key={i} className="rounded bg-amber-200 px-0.5">
-            {part}
-          </mark>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="rounded bg-yellow-200 px-0.5 text-slate-900">{part}</mark>
         ) : (
           <span key={i}>{part}</span>
         )
       )}
     </>
   );
+}
+
+function formatDataPreview(data: unknown) {
+  try { return JSON.stringify(data, null, 2); } catch { return String(data); }
+}
+
+function matchesSearch(row: DatabaseEntryRow, q: string) {
+  if (!q.trim()) return true;
+  const lower = q.toLowerCase();
+  if (row.label.toLowerCase().includes(lower)) return true;
+  if (row.notes && row.notes.toLowerCase().includes(lower)) return true;
+  if (row.data && JSON.stringify(row.data).toLowerCase().includes(lower)) return true;
+  return false;
 }
 
 export function DatabaseWorkspacePanel({
@@ -87,48 +81,40 @@ export function DatabaseWorkspacePanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<DatabaseEntryRow | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const filteredEntries = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((row) => {
-      const hay = getRowSearchableText(row).toLowerCase();
-      return hay.includes(q);
+  const isTableMissing = queryError?.toLowerCase().includes("schema cache") ||
+    queryError?.toLowerCase().includes("does not exist") ||
+    queryError?.toLowerCase().includes("database_entries");
+
+  const filtered = useMemo(
+    () => entries.filter((r) => matchesSearch(r, search)),
+    [entries, search]
+  );
+
+  const copySQL = () => {
+    navigator.clipboard.writeText(SETUP_SQL).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     });
-  }, [entries, searchQuery]);
-
-  const snippetById = useMemo(() => {
-    const q = searchQuery.trim();
-    const map = new Map<string, string>();
-    if (!q) return map;
-    for (const row of filteredEntries) {
-      const snippet = buildMatchSnippet(getRowSearchableText(row), q);
-      map.set(row.id, snippet ?? (row.notes.slice(0, 280) || row.label));
-    }
-    return map;
-  }, [filteredEntries, searchQuery]);
+  };
 
   const onCreate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!hasSupabase) {
-      setError("Configure Supabase to create records.");
-      return;
-    }
+    if (!hasSupabase) { setError("Configure Supabase to create records."); return; }
     const fd = new FormData(e.currentTarget);
-    const label = String(fd.get("label") || "");
-    const notes = String(fd.get("notes") || "");
-    const dataRaw = String(fd.get("data") || "");
     setError(null);
     startTransition(async () => {
-      const res = await createDatabaseEntryAction({ label, notes, data: dataRaw });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
+      const res = await createDatabaseEntryAction({
+        label: String(fd.get("label") || ""),
+        notes: String(fd.get("notes") || ""),
+        data: String(fd.get("data") || ""),
+      });
+      if (!res.ok) { setError(res.error); return; }
       (e.target as HTMLFormElement).reset();
       const dataField = (e.target as HTMLFormElement).elements.namedItem("data") as HTMLTextAreaElement;
       if (dataField) dataField.value = "{}";
@@ -138,62 +124,46 @@ export function DatabaseWorkspacePanel({
 
   const onUpdate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!editing) return;
-    if (!hasSupabase) {
-      setError("Configure Supabase to update records.");
-      return;
-    }
+    if (!editing || !hasSupabase) return;
     const fd = new FormData(e.currentTarget);
-    const label = String(fd.get("label") || "");
-    const notes = String(fd.get("notes") || "");
-    const dataRaw = String(fd.get("data") || "");
     setError(null);
     startTransition(async () => {
-      const res = await updateDatabaseEntryAction(editing.id, { label, notes, data: dataRaw });
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
+      const res = await updateDatabaseEntryAction(editing.id, {
+        label: String(fd.get("label") || ""),
+        notes: String(fd.get("notes") || ""),
+        data: String(fd.get("data") || ""),
+      });
+      if (!res.ok) { setError(res.error); return; }
       setEditing(null);
       router.refresh();
     });
   };
 
   const onDelete = (id: string) => {
-    if (!hasSupabase) {
-      setError("Configure Supabase to delete records.");
-      return;
-    }
+    if (!hasSupabase) { setError("Configure Supabase to delete records."); return; }
     setError(null);
     startTransition(async () => {
       const res = await deleteDatabaseEntryAction(id);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
+      if (!res.ok) { setError(res.error); return; }
       if (editing?.id === id) setEditing(null);
       router.refresh();
     });
   };
 
-  const onImportDocx = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!hasSupabase) {
-      setError("Configure Supabase to import documents.");
-      return;
-    }
-    const form = e.currentTarget;
-    const fd = new FormData(form);
+  const onImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!hasSupabase) { setError("Configure Supabase to import records."); return; }
+    setImportMsg("Importing…");
     setError(null);
-    setImportMessage(null);
+    const fd = new FormData();
+    fd.append("file", file);
     startTransition(async () => {
-      const res = await importDocxChunksAction(fd);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      setImportMessage(`Imported ${res.inserted} searchable chunk${res.inserted === 1 ? "" : "s"} from your Word file.`);
-      form.reset();
+      const res = await importFromDocxAction(fd);
+      if (fileRef.current) fileRef.current.value = "";
+      if (!res.ok) { setError(res.error); setImportMsg(null); return; }
+      setImportMsg(`Imported ${res.count} record${res.count !== 1 ? "s" : ""} successfully.`);
+      setTimeout(() => setImportMsg(null), 4000);
       router.refresh();
     });
   };
@@ -201,158 +171,128 @@ export function DatabaseWorkspacePanel({
   return (
     <div>
       <p className="mb-4 text-sm text-slate-600">
-        Each record has a <span className="font-medium">label</span>, optional <span className="font-medium">notes</span>
-        , and a <span className="font-medium">data</span> JSON object. For Word imports, full text is stored in{" "}
-        <code className="rounded bg-slate-100 px-1 text-xs">data.content</code> so keyword search can surface it. REST:{" "}
-        <code className="rounded bg-slate-100 px-1 text-xs">/api/database/entries</code>. For image-heavy pages, use the{" "}
-        <a
-          className="font-medium text-sky-700 underline"
-          href="https://github.com/ronaldbadua/docx-to-full-text"
-          target="_blank"
-          rel="noreferrer"
-        >
-          docx-to-full-text
-        </a>{" "}
-        CLI for OCR, then paste chunks manually if needed.
+        Search, add, or import records into your Supabase database.{" "}
+        <span className="text-slate-400">REST: <code className="rounded bg-slate-100 px-1 text-xs">/api/database/entries</code></span>
       </p>
+
       {!hasSupabase ? <ConfigBanner /> : null}
-      {queryError && queryError !== "missing_config" ? (
+
+      {isTableMissing && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="mb-2 font-semibold text-amber-900">Database table setup required</p>
+          <p className="mb-3 text-sm text-amber-800">
+            The <code className="rounded bg-amber-100 px-1 text-xs">database_entries</code> table does not exist yet in your Supabase project.
+            Copy the SQL below and run it in your{" "}
+            <a href="https://supabase.com/dashboard" target="_blank" rel="noreferrer" className="underline">
+              Supabase SQL Editor
+            </a>.
+          </p>
+          <pre className="mb-3 max-h-48 overflow-auto rounded-lg bg-amber-100 p-3 text-xs text-amber-900 whitespace-pre-wrap">
+            {SETUP_SQL}
+          </pre>
+          <button
+            type="button"
+            onClick={copySQL}
+            className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+          >
+            {copied ? "Copied!" : "Copy SQL"}
+          </button>
+        </div>
+      )}
+
+      {queryError && !isTableMissing ? (
         <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
           {queryError}
         </p>
       ) : null}
+
       {error ? (
         <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
           {error}
         </p>
       ) : null}
-      {importMessage ? (
-        <p className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status">
-          {importMessage}
+
+      {importMsg ? (
+        <p className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {importMsg}
         </p>
       ) : null}
 
-      <div className="mb-6 overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-        <div className="border-b border-slate-200/80 px-4 py-3">
-          <h3 className="text-sm font-bold text-slate-900">Import Word (.docx)</h3>
-          <p className="mt-1 text-xs text-slate-500">
-            Body text is extracted with Mammoth (same family as{" "}
-            <a className="text-sky-700 underline" href="https://github.com/ronaldbadua/docx-to-full-text" target="_blank" rel="noreferrer">
-              docx-to-full-text
-            </a>
-            ). One database record is created per chunk so search stays fast.
-          </p>
-          <form onSubmit={onImportDocx} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="min-w-0 flex-1">
-              <label htmlFor="docx-import-file" className="mb-1 block text-xs font-medium text-slate-500">
-                File
-              </label>
-              <input
-                id="docx-import-file"
-                name="file"
-                type="file"
-                accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                required
-                disabled={!hasSupabase || pending}
-                className="block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-sky-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-sky-800 hover:file:bg-sky-100"
-              />
-            </div>
-            <button
-              type="submit"
-              className="shrink-0 rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
-              disabled={!hasSupabase || pending}
-            >
-              {pending ? "Importing…" : "Import to database"}
-            </button>
-          </form>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px]">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by title, section, or content…"
+            className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-400"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">✕</button>
+          )}
         </div>
+        <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700 hover:bg-sky-100">
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+          </svg>
+          Import Word (.docx)
+          <input ref={fileRef} type="file" accept=".docx" className="sr-only" onChange={onImport} disabled={pending} />
+        </label>
       </div>
 
       <div className="mb-6 overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-        <div className="border-b border-slate-200/80 px-4 py-3">
-          <h3 className="text-sm font-bold text-slate-900">Document search</h3>
-          <p className="text-xs text-slate-500">
-            Type a keyword or phrase. Matching records show a highlighted excerpt; open “Show full text” for the whole chunk.
-          </p>
-          <div className="mt-3">
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-              placeholder="Search labels, notes, and imported document text…"
-              aria-label="Search database records"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              {searchQuery.trim()
-                ? `${filteredEntries.length} match${filteredEntries.length === 1 ? "" : "es"} out of ${entries.length} records.`
-                : `${entries.length} record${entries.length === 1 ? "" : "s"} loaded.`}
+        <div className="border-b border-slate-200/80 px-4 py-3 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">Records</h3>
+            <p className="text-xs text-slate-500">
+              {search ? `${filtered.length} of ${entries.length} match` : `${entries.length} total — most recently updated first`}
             </p>
           </div>
         </div>
         <ul className="divide-y divide-slate-100">
-          {entries.length === 0 ? (
-            <li className="px-4 py-6 text-sm text-slate-500">No database records yet. Import a .docx above or add a record below.</li>
-          ) : filteredEntries.length === 0 ? (
-            <li className="px-4 py-6 text-sm text-slate-500">No records match your search. Try another keyword.</li>
+          {filtered.length === 0 ? (
+            <li className="px-4 py-6 text-sm text-slate-500">
+              {search ? `No records match "${search}".` : "No database records yet. Add one below or import a Word document."}
+            </li>
           ) : (
-            filteredEntries.map((row) => {
-              const fullText = getContentFromData(row.data);
-              const isOpen = Boolean(expanded[row.id]);
-              const q = searchQuery.trim();
-              const snippet = q ? snippetById.get(row.id) ?? "" : null;
-              return (
-                <li key={row.id} className="px-4 py-3">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {q ? <HighlightText text={row.label} query={q} /> : row.label}
+            filtered.map((row) => (
+              <li key={row.id} className="px-4 py-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  {highlight(row.label, search)}
+                </p>
+                {row.notes ? (
+                  <p className="mt-1 text-sm text-slate-600 whitespace-pre-line">
+                    {highlight(row.notes, search)}
                   </p>
-                  {q && snippet ? (
-                    <p className="mt-2 rounded-md border border-amber-100 bg-amber-50/80 px-2 py-2 text-sm leading-relaxed text-slate-800">
-                      <HighlightText text={snippet} query={q} />
-                    </p>
-                  ) : !q && row.notes ? (
-                    <p className="mt-1 text-sm text-slate-600">{row.notes}</p>
-                  ) : null}
-                  {fullText && isOpen ? (
-                    <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-50 p-3 text-xs text-slate-800">
-                      {q ? <HighlightText text={fullText} query={q} /> : fullText}
-                    </pre>
-                  ) : null}
-                  {!fullText && row.data && typeof row.data === "object" && !Array.isArray(row.data) && Object.keys(row.data).length > 0 ? (
-                    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-slate-50 p-2 text-xs text-slate-700">
-                      {formatDataPreview(row.data)}
-                    </pre>
-                  ) : null}
-                  <div className="mt-2 flex flex-wrap justify-end gap-2">
-                    {fullText ? (
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-slate-700 hover:underline"
-                        onClick={() => setExpanded((prev) => ({ ...prev, [row.id]: !prev[row.id] }))}
-                        disabled={pending}
-                      >
-                        {isOpen ? "Hide full text" : "Show full text"}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-sky-700 hover:underline"
-                      onClick={() => setEditing(row)}
-                      disabled={pending}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="text-sm font-medium text-rose-600 hover:underline"
-                      onClick={() => onDelete(row.id)}
-                      disabled={pending}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </li>
-              );
-            })
+                ) : null}
+                {row.data && typeof row.data === "object" && !Array.isArray(row.data) && Object.keys(row.data).length > 0 ? (
+                  <pre className="mt-2 max-h-32 overflow-auto rounded-lg bg-slate-50 p-2 text-xs text-slate-700">
+                    {formatDataPreview(row.data)}
+                  </pre>
+                ) : null}
+                <div className="mt-2 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-sky-700 hover:underline"
+                    onClick={() => setEditing(row)}
+                    disabled={pending}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-rose-600 hover:underline"
+                    onClick={() => onDelete(row.id)}
+                    disabled={pending}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </li>
+            ))
           )}
         </ul>
       </div>
@@ -362,28 +302,28 @@ export function DatabaseWorkspacePanel({
           <h3 className="text-sm font-bold text-slate-900">Add record</h3>
           <form onSubmit={onCreate} className="mt-3 space-y-3">
             <div>
-              <FormLabel>Label</FormLabel>
+              <FormLabel>Label / Title</FormLabel>
               <input
                 name="label"
                 required
                 className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-                placeholder="Display name"
+                placeholder="Display name or section heading"
               />
             </div>
             <div>
-              <FormLabel>Notes</FormLabel>
+              <FormLabel>Content / Notes</FormLabel>
               <textarea
                 name="notes"
-                rows={3}
+                rows={4}
                 className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-                placeholder="Optional"
+                placeholder="Paste text, instructions, or notes here…"
               />
             </div>
             <div>
-              <FormLabel>Data (JSON object)</FormLabel>
+              <FormLabel>Extra data (JSON)</FormLabel>
               <textarea
                 name="data"
-                rows={4}
+                rows={2}
                 defaultValue="{}"
                 className="w-full rounded-lg border border-slate-200 px-2 py-2 font-mono text-xs"
                 placeholder="{}"
@@ -406,7 +346,7 @@ export function DatabaseWorkspacePanel({
             <h3 className="text-sm font-bold text-slate-900">Edit record</h3>
             <form key={editing.id} onSubmit={onUpdate} className="mt-3 space-y-3">
               <div>
-                <FormLabel>Label</FormLabel>
+                <FormLabel>Label / Title</FormLabel>
                 <input
                   name="label"
                   required
@@ -415,19 +355,19 @@ export function DatabaseWorkspacePanel({
                 />
               </div>
               <div>
-                <FormLabel>Notes</FormLabel>
+                <FormLabel>Content / Notes</FormLabel>
                 <textarea
                   name="notes"
-                  rows={3}
+                  rows={4}
                   className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
                   defaultValue={editing.notes}
                 />
               </div>
               <div>
-                <FormLabel>Data (JSON object)</FormLabel>
+                <FormLabel>Extra data (JSON)</FormLabel>
                 <textarea
                   name="data"
-                  rows={4}
+                  rows={2}
                   className="w-full rounded-lg border border-slate-200 px-2 py-2 font-mono text-xs"
                   defaultValue={formatDataPreview(editing.data)}
                 />
@@ -446,7 +386,7 @@ export function DatabaseWorkspacePanel({
                   className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-60"
                   disabled={pending}
                 >
-                  {pending ? "Saving…" : "Save"}
+                  {pending ? "Saving…" : "Save changes"}
                 </button>
               </div>
             </form>
