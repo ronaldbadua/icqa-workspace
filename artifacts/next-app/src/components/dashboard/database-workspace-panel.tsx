@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   createDatabaseEntryAction,
@@ -32,18 +32,6 @@ export function DatabaseWorkspacePanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<DatabaseEntryRow | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const filteredEntries = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return entries;
-    return entries.filter((row) => {
-      const label = row.label.toLowerCase();
-      const notes = row.notes.toLowerCase();
-      const data = formatDataPreview(row.data).toLowerCase();
-      return label.includes(q) || notes.includes(q) || data.includes(q);
-    });
-  }, [entries, searchQuery]);
 
   const onCreate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -131,29 +119,13 @@ export function DatabaseWorkspacePanel({
       <div className="mb-6 overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
         <div className="border-b border-slate-200/80 px-4 py-3">
           <h3 className="text-sm font-bold text-slate-900">Records</h3>
-          <p className="text-xs text-slate-500">Most recently updated first. Search matches label, notes, and JSON data.</p>
-          <div className="mt-3">
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-              placeholder="Type a query (example: audit, section 3, compliance)"
-              aria-label="Search database records"
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              {searchQuery.trim()
-                ? `Showing ${filteredEntries.length} of ${entries.length} records.`
-                : `Showing all ${entries.length} records.`}
-            </p>
-          </div>
+          <p className="text-xs text-slate-500">Most recently updated first.</p>
         </div>
         <ul className="divide-y divide-slate-100">
           {entries.length === 0 ? (
             <li className="px-4 py-6 text-sm text-slate-500">No database records yet. Add one below.</li>
-          ) : filteredEntries.length === 0 ? (
-            <li className="px-4 py-6 text-sm text-slate-500">No records match your query. Try a different keyword.</li>
           ) : (
-            filteredEntries.map((row) => (
+            entries.map((row) => (
               <li key={row.id} className="px-4 py-3">
                 <p className="text-sm font-semibold text-slate-900">{row.label}</p>
                 {row.notes ? <p className="mt-1 text-sm text-slate-600">{row.notes}</p> : null}
