@@ -173,6 +173,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
             <StatusPill label="Resolved" value={summary.resolved} tone="success" />
             <StatusPill label="Pending" value={summary.pending} tone="warning" />
             <StatusPill label="Needs Attention" value={summary.needsAttention} tone="danger" />
+            <StatusPill label="No Actions Needed" value={summary.noActionNeeded} tone="info" />
             <StatusPill label="Total Logged" value={summary.totalLogged} tone="neutral" />
           </div>
         </div>
@@ -186,7 +187,9 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                 ? "bg-emerald-50/50"
                 : slot.status === "needs_attention"
                   ? "bg-rose-50/50"
-                  : "bg-amber-50/60";
+                  : slot.status === "no_action_needed"
+                    ? "bg-sky-50/50"
+                    : "bg-amber-50/60";
             const f = getForm(slot);
             return (
               <li key={slot.hour} className={rowTone}>
@@ -226,9 +229,10 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       <div className="flex flex-wrap gap-2">
                         {(
                           [
-                            { value: "pending",         label: "Pending",         active: "bg-amber-100 text-amber-800 ring-2 ring-amber-400",   inactive: "bg-white text-amber-700 border border-amber-200 hover:bg-amber-50" },
-                            { value: "resolved",        label: "Resolved",        active: "bg-emerald-100 text-emerald-800 ring-2 ring-emerald-400", inactive: "bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50" },
-                            { value: "needs_attention", label: "Needs Attention", active: "bg-rose-100 text-rose-700 ring-2 ring-rose-400",        inactive: "bg-white text-rose-600 border border-rose-200 hover:bg-rose-50" },
+                            { value: "pending",          label: "Pending",           active: "bg-amber-100 text-amber-800 ring-2 ring-amber-400",    inactive: "bg-white text-amber-700 border border-amber-200 hover:bg-amber-50" },
+                            { value: "resolved",         label: "Resolved",          active: "bg-emerald-100 text-emerald-800 ring-2 ring-emerald-400", inactive: "bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50" },
+                            { value: "needs_attention",  label: "Needs Attention",   active: "bg-rose-100 text-rose-700 ring-2 ring-rose-400",         inactive: "bg-white text-rose-600 border border-rose-200 hover:bg-rose-50" },
+                            { value: "no_action_needed", label: "No Actions Needed", active: "bg-sky-100 text-sky-800 ring-2 ring-sky-400",            inactive: "bg-white text-sky-700 border border-sky-200 hover:bg-sky-50" },
                           ] as const
                         ).map((opt) => (
                           <button
