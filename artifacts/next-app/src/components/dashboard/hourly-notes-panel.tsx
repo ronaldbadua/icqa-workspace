@@ -4,13 +4,13 @@ import { useMemo, useState, useTransition, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { upsertHourlyNote, deleteHourlyNote } from "@/app/actions/hourly-notes";
 import type { HourlyNoteStatus } from "@/lib/supabase/database.types";
-import { HOURLY_NOTES_HOUR_END, HOURLY_NOTES_HOUR_START } from "@/lib/constants";
+import { HOURLY_NOTES_HOUR_END, HOURLY_NOTES_HOUR_START, STAND_UP_2_HOUR } from "@/lib/constants";
 import { buildHourlySlots, summarizeHourlyStatus, type HourlySlot } from "@/lib/hourly-notes-logic";
 import { ConfigBanner } from "@/components/dashboard/config-banner";
 import { FormLabel, HourlyRowStatusBadge, StatusPill } from "@/components/dashboard/status-pill";
 
 function formatHourLabel(h: number): string {
-  if (h === 6) return "Stand Up";
+  if (h === 6 || h === STAND_UP_2_HOUR) return "Stand Up";
   const d = new Date(2000, 0, 1, h, 0, 0, 0);
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
@@ -170,10 +170,10 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
 
         <div className="px-5 py-4">
           <div className="flex flex-wrap gap-2">
+            <StatusPill label="No Actions Needed" value={summary.noActionNeeded} tone="info" />
             <StatusPill label="Resolved" value={summary.resolved} tone="success" />
             <StatusPill label="Pending" value={summary.pending} tone="warning" />
             <StatusPill label="Needs Attention" value={summary.needsAttention} tone="danger" />
-            <StatusPill label="No Actions Needed" value={summary.noActionNeeded} tone="info" />
             <StatusPill label="Total Logged" value={summary.totalLogged} tone="neutral" />
           </div>
         </div>
@@ -229,10 +229,10 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       <div className="flex flex-wrap gap-2">
                         {(
                           [
-                            { value: "pending",          label: "Pending",           active: "bg-amber-100 text-amber-800 ring-2 ring-amber-400",    inactive: "bg-white text-amber-700 border border-amber-200 hover:bg-amber-50" },
-                            { value: "resolved",         label: "Resolved",          active: "bg-emerald-100 text-emerald-800 ring-2 ring-emerald-400", inactive: "bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50" },
-                            { value: "needs_attention",  label: "Needs Attention",   active: "bg-rose-100 text-rose-700 ring-2 ring-rose-400",         inactive: "bg-white text-rose-600 border border-rose-200 hover:bg-rose-50" },
-                            { value: "no_action_needed", label: "No Actions Needed", active: "bg-sky-100 text-sky-800 ring-2 ring-sky-400",            inactive: "bg-white text-sky-700 border border-sky-200 hover:bg-sky-50" },
+                            { value: "no_action_needed", label: "No Actions Needed", active: "bg-sky-100 text-sky-800 ring-2 ring-sky-400",             inactive: "bg-white text-sky-700 border border-sky-200 hover:bg-sky-50" },
+                            { value: "resolved",         label: "Resolved",          active: "bg-emerald-100 text-emerald-800 ring-2 ring-emerald-400",  inactive: "bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50" },
+                            { value: "pending",          label: "Pending",           active: "bg-amber-100 text-amber-800 ring-2 ring-amber-400",        inactive: "bg-white text-amber-700 border border-amber-200 hover:bg-amber-50" },
+                            { value: "needs_attention",  label: "Needs Attention",   active: "bg-rose-100 text-rose-700 ring-2 ring-rose-400",           inactive: "bg-white text-rose-600 border border-rose-200 hover:bg-rose-50" },
                           ] as const
                         ).map((opt) => (
                           <button
