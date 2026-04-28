@@ -10,6 +10,7 @@ import { ConfigBanner } from "@/components/dashboard/config-banner";
 import { FormLabel, HourlyRowStatusBadge, StatusPill } from "@/components/dashboard/status-pill";
 
 function formatHourLabel(h: number): string {
+  if (h === 6) return "Stand Up";
   const d = new Date(2000, 0, 1, h, 0, 0, 0);
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
