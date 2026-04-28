@@ -96,6 +96,35 @@ export async function insertDatabaseEntry(
   return { data, error: null };
 }
 
+const BULK_INSERT_BATCH = 75;
+
+export async function insertDatabaseEntries(
+  supabase: SupabaseClient<Database>,
+  inputs: Array<{ label: string; notes: string; data: unknown }>
+): Promise<{ inserted: number; error: string | null }> {
+  if (inputs.length === 0) {
+    return { inserted: 0, error: null };
+  }
+  const rows: Array<{ label: string; notes: string; data: Json }> = [];
+  for (const input of inputs) {
+    const v = validateEntryInput(input);
+    if (!v.ok) {
+      return { inserted: 0, error: v.error };
+    }
+    rows.push({ label: v.label, notes: v.notes, data: v.data });
+  }
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += BULK_INSERT_BATCH) {
+    const batch = rows.slice(i, i + BULK_INSERT_BATCH);
+    const { error } = await supabase.from("database_entries").insert(batch);
+    if (error) {
+      return { inserted, error: mapDatabaseEntriesError(error.message) };
+    }
+    inserted += batch.length;
+  }
+  return { inserted, error: null };
+}
+
 export async function updateDatabaseEntry(
   supabase: SupabaseClient<Database>,
   id: string,
