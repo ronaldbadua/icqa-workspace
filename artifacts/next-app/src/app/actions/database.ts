@@ -93,6 +93,27 @@ export async function importFromDocxAction(
   return { ok: true, count: records.length };
 }
 
+export async function searchDatabaseEntriesAction(
+  query: string
+): Promise<{ ok: true; results: { id: string; label: string; notes: string }[] } | { ok: false; error: string }> {
+  const q = query.trim();
+  if (!q) return { ok: true, results: [] };
+
+  const supabase = await getSupabase();
+  if (!supabase) return { ok: false, error: "Supabase is not configured." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
+    .from("database_entries")
+    .select("id, label, notes")
+    .or(`label.ilike.%${q}%,notes.ilike.%${q}%`)
+    .order("updated_at", { ascending: false })
+    .limit(100);
+
+  if (error) return { ok: false, error: (error as { message: string }).message };
+  return { ok: true, results: (data ?? []) as { id: string; label: string; notes: string }[] };
+}
+
 export async function bulkCreateDatabaseEntriesAction(
   records: { label: string; notes: string; data: Record<string, unknown> }[]
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
