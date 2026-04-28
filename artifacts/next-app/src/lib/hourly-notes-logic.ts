@@ -1,4 +1,5 @@
 import type { HourlyNoteStatus } from "@/lib/supabase/database.types";
+import { STAND_UP_2_HOUR } from "@/lib/constants";
 
 export interface HourlySlot {
   hour: number;
@@ -38,8 +39,16 @@ export function buildHourlySlots(
   const byHour = new Map(
     rows.map((r) => [r.hour, { ...r, hasPersistedRow: true }])
   );
-  const out: HourlySlot[] = [];
+
+  // Build ordered list of hour slots, inserting the second Stand Up between 9 and 10
+  const hourOrder: number[] = [];
   for (let h = rangeStart; h <= rangeEnd; h++) {
+    hourOrder.push(h);
+    if (h === 9) hourOrder.push(STAND_UP_2_HOUR); // second Stand Up before 10 AM
+  }
+
+  const out: HourlySlot[] = [];
+  for (const h of hourOrder) {
     const row = byHour.get(h);
     if (row) {
       out.push({
