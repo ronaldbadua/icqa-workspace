@@ -104,7 +104,7 @@ export async function getChatMessages(limit = 200) {
 }
 
 export async function getDatabaseEntries() {
-  const supabase = await createServerSupabaseClient();
+  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) {
     return { entries: [] as DatabaseEntryRow[], error: "missing_config" as const };
   }
