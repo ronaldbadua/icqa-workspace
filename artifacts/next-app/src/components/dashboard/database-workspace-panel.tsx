@@ -31,6 +31,10 @@ CREATE TRIGGER database_entries_updated_at
   BEFORE UPDATE ON public.database_entries
   FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
+-- Add source tracking columns (safe to run multiple times)
+ALTER TABLE public.database_entries ADD COLUMN IF NOT EXISTS source_file text DEFAULT NULL;
+ALTER TABLE public.database_entries ADD COLUMN IF NOT EXISTS sort_order integer DEFAULT NULL;
+
 ALTER TABLE public.database_entries ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS allow_all_authenticated ON public.database_entries;
