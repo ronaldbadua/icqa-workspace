@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useTransition, useRef, useEffect, useCallback } from "react";
+import {
+  useState,
+  useTransition,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   deleteDatabaseEntryAction,
   importFromDocxAction,
@@ -47,6 +53,7 @@ CREATE POLICY allow_service_role ON public.database_entries
 
 type SearchResult = { id: string; label: string; notes: string };
 
+// ── Text highlight helper ──────────────────────────────────────────────────
 function highlight(text: string, query: string) {
   if (!query.trim() || !text) return <>{text}</>;
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -66,6 +73,238 @@ function highlight(text: string, query: string) {
   );
 }
 
+// ── Inline Word-style Document Viewer ─────────────────────────────────────
+interface DocViewerProps {
+  record: SearchResult;
+  globalQuery: string;
+  onClose: () => void;
+}
+
+function DocViewer({ record, globalQuery, onClose }: DocViewerProps) {
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState(globalQuery);
+  const [matchIndex, setMatchIndex] = useState(0);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const matchRefs = useRef<HTMLElement[]>([]);
+
+  // Full text = label + newline + notes
+  const fullText = [record.label, record.notes].filter(Boolean).join("\n\n");
+
+  // ── Keyboard shortcut: Ctrl/Cmd+F opens find bar ──────────────────────
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+        setTimeout(() => findInputRef.current?.focus(), 50);
+      }
+      if (e.key === "Escape") {
+        setFindOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Focus find input when opened
+  useEffect(() => {
+    if (findOpen) setTimeout(() => findInputRef.current?.focus(), 50);
+  }, [findOpen]);
+
+  // ── Build highlighted content ──────────────────────────────────────────
+  const q = findQuery.trim();
+
+  const { segments, matchCount } = useMemo(() => {
+    if (!q) return { segments: [{ text: fullText, match: false }], matchCount: 0 };
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = fullText.split(new RegExp(`(${escaped})`, "gi"));
+    let count = 0;
+    const segs = parts.map((part) => {
+      const isMatch = part.toLowerCase() === q.toLowerCase();
+      if (isMatch) count++;
+      return { text: part, match: isMatch };
+    });
+    return { segments: segs, matchCount: count };
+  }, [fullText, q]);
+
+  // Clamp matchIndex when matchCount changes
+  useEffect(() => {
+    setMatchIndex((i) => (matchCount > 0 ? Math.min(i, matchCount - 1) : 0));
+  }, [matchCount]);
+
+  // Scroll current match into view
+  useEffect(() => {
+    const el = matchRefs.current[matchIndex];
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [matchIndex, matchCount]);
+
+  const goPrev = () => setMatchIndex((i) => (i > 0 ? i - 1 : matchCount - 1));
+  const goNext = () => setMatchIndex((i) => (i < matchCount - 1 ? i + 1 : 0));
+
+  const onFindKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") { e.shiftKey ? goPrev() : goNext(); }
+    if (e.key === "Escape") setFindOpen(false);
+  };
+
+  // Render content with match highlights
+  let matchCounter = 0;
+  const renderedContent = q ? (
+    <>
+      {segments.map((seg, i) => {
+        if (!seg.match) {
+          return <span key={i} style={{ whiteSpace: "pre-wrap" }}>{seg.text}</span>;
+        }
+        const idx = matchCounter++;
+        const isCurrent = idx === matchIndex;
+        return (
+          <mark
+            key={i}
+            ref={(el) => { if (el) matchRefs.current[idx] = el; }}
+            className={`rounded px-0.5 font-medium ${
+              isCurrent
+                ? "bg-orange-400 text-white ring-2 ring-orange-500"
+                : "bg-yellow-200 text-slate-900"
+            }`}
+          >
+            {seg.text}
+          </mark>
+        );
+      })}
+    </>
+  ) : (
+    <span style={{ whiteSpace: "pre-wrap" }}>{fullText}</span>
+  );
+
+  return (
+    <div className="overflow-hidden rounded-xl border-2 border-slate-300 bg-white shadow-md">
+      {/* Toolbar — Word-style header */}
+      <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2.5">
+        {/* Word icon */}
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded bg-blue-700 text-xs font-bold text-white">W</div>
+        <div className="flex-1 min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-800">{record.label}</p>
+          <p className="text-xs text-slate-400">Word Document Viewer</p>
+        </div>
+        {/* Ctrl+F hint / open find */}
+        <button
+          type="button"
+          onClick={() => setFindOpen((o) => !o)}
+          title="Find in document (Ctrl+F)"
+          className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-100 transition-colors"
+        >
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          Find
+          <kbd className="ml-0.5 rounded bg-slate-100 px-1 text-[10px] text-slate-400 border border-slate-200">Ctrl+F</kbd>
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors"
+          aria-label="Close viewer"
+        >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Find bar */}
+      {findOpen && (
+        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2">
+          <svg className="h-4 w-4 flex-shrink-0 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+          </svg>
+          <input
+            ref={findInputRef}
+            type="text"
+            value={findQuery}
+            onChange={(e) => { setFindQuery(e.target.value); setMatchIndex(0); matchRefs.current = []; }}
+            onKeyDown={onFindKeyDown}
+            placeholder="Find in document…"
+            className="flex-1 rounded border border-amber-300 bg-white px-3 py-1 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-300/40"
+          />
+          {q && (
+            <span className="text-xs font-medium text-amber-700 whitespace-nowrap">
+              {matchCount === 0 ? "No matches" : `${matchIndex + 1} of ${matchCount}`}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={goPrev}
+            disabled={matchCount === 0}
+            className="rounded p-1 text-slate-600 hover:bg-amber-100 disabled:opacity-40"
+            title="Previous match (Shift+Enter)"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={goNext}
+            disabled={matchCount === 0}
+            className="rounded p-1 text-slate-600 hover:bg-amber-100 disabled:opacity-40"
+            title="Next match (Enter)"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFindOpen(false)}
+            className="rounded p-1 text-slate-400 hover:bg-amber-100 hover:text-slate-700"
+            title="Close (Esc)"
+          >
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Page / document content */}
+      <div
+        ref={contentRef}
+        className="overflow-y-auto bg-slate-100 px-8 py-8"
+        style={{ maxHeight: "560px" }}
+      >
+        {/* A4-style white "page" */}
+        <div className="mx-auto max-w-3xl rounded-sm bg-white px-12 py-10 shadow-md text-sm leading-relaxed text-slate-800 font-[Georgia,serif] min-h-[400px]">
+          {/* Document title */}
+          <h1 className="mb-6 border-b border-slate-200 pb-4 text-xl font-bold text-slate-900 font-sans">
+            {q ? (
+              <>
+                {record.label.split(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi")).map((p, i) =>
+                  p.toLowerCase() === q.toLowerCase() ? (
+                    <mark key={i} className="rounded bg-yellow-200 px-0.5 font-bold text-slate-900">{p}</mark>
+                  ) : <span key={i}>{p}</span>
+                )}
+              </>
+            ) : record.label}
+          </h1>
+          {/* Body */}
+          <div className="leading-7">
+            {renderedContent}
+          </div>
+        </div>
+      </div>
+
+      {/* Footer status bar */}
+      <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-1.5 text-[11px] text-slate-400">
+        <span>{fullText.split(/\s+/).filter(Boolean).length} words · {fullText.length} characters</span>
+        {q && matchCount > 0 && (
+          <span className="font-medium text-amber-600">{matchCount} match{matchCount !== 1 ? "es" : ""} found</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Panel ─────────────────────────────────────────────────────────────
 export function DatabaseWorkspacePanel({
   entries,
   hasSupabase,
@@ -87,6 +326,7 @@ export function DatabaseWorkspacePanel({
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [docsCollapsed, setDocsCollapsed] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState<SearchResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -156,6 +396,7 @@ export function DatabaseWorkspacePanel({
       const res = await deleteDatabaseEntryAction(id);
       if (!res.ok) { setError(res.error); return; }
       if (expandedId === id) setExpandedId(null);
+      if (selectedRecord?.id === id) setSelectedRecord(null);
       setResults((prev) => prev.filter((r) => r.id !== id));
       router.refresh();
     });
@@ -299,7 +540,14 @@ export function DatabaseWorkspacePanel({
                     ) : (
                       <p className="text-xs text-slate-400 italic">No additional content.</p>
                     )}
-                    <div className="mt-3 flex justify-end">
+                    <div className="mt-3 flex justify-end gap-3">
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-sky-600 hover:underline"
+                        onClick={() => setSelectedRecord({ id: row.id, label: row.label, notes: row.notes ?? "" })}
+                      >
+                        Open in viewer
+                      </button>
                       <button type="button" className="text-xs font-medium text-rose-500 hover:underline" onClick={() => onDelete(row.id)} disabled={pending}>
                         Delete record
                       </button>
@@ -322,7 +570,7 @@ export function DatabaseWorkspacePanel({
               : search.trim() && hasSearched
               ? results.length === 0
                 ? `No matches found for "${search}"`
-                : `${results.length} match${results.length !== 1 ? "es" : ""} found for "${search}"`
+                : `${results.length} match${results.length !== 1 ? "es" : ""} found for "${search}" — click a result to open it`
               : "Type a keyword above — results from Main Source Docs will appear here"}
           </p>
         </div>
@@ -354,9 +602,12 @@ export function DatabaseWorkspacePanel({
           <ul className="divide-y divide-slate-100 max-h-[28rem] overflow-y-auto">
             {results.map((row) => (
               <li key={row.id}>
-                <Link
-                  href={`/database/${row.id}?q=${encodeURIComponent(search)}`}
-                  className="flex items-start gap-3 px-4 py-4 hover:bg-sky-50 transition-colors group"
+                <button
+                  type="button"
+                  onClick={() => setSelectedRecord(row)}
+                  className={`flex w-full items-start gap-3 px-4 py-4 text-left hover:bg-sky-50 transition-colors group ${
+                    selectedRecord?.id === row.id ? "bg-sky-50 border-l-4 border-sky-500" : ""
+                  }`}
                 >
                   <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-500 group-hover:text-sky-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -371,15 +622,23 @@ export function DatabaseWorkspacePanel({
                       </p>
                     ) : null}
                   </div>
-                  <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-300 group-hover:text-sky-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </Link>
+                  <span className="mt-0.5 flex-shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700">Open</span>
+                </button>
               </li>
             ))}
           </ul>
         )}
       </div>
+
+      {/* ── Word Document Viewer (below results) ───────────────────────────── */}
+      {selectedRecord && (
+        <DocViewer
+          key={selectedRecord.id}
+          record={selectedRecord}
+          globalQuery={search}
+          onClose={() => setSelectedRecord(null)}
+        />
+      )}
     </div>
   );
 }
