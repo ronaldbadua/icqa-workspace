@@ -10,6 +10,7 @@ import {
   upsertAssignment,
   upsertPoolingRule,
 } from "@/app/actions/scheduling";
+import { saveAssociateLogin } from "@/app/actions/associate-table";
 import type { AssociateRow, MonthlyAssignmentRow, PoolingRuleRow } from "@/lib/data/queries";
 import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 import { addMonths, parseYm, toYm } from "@/lib/week";
@@ -53,11 +54,13 @@ export function ShiftManagerPanel({
   rules,
   assignments,
   monthDays,
+  loginMap = {},
   hasSupabase,
   queryError,
 }: {
   ym: string;
   associates: AssociateRow[];
+  loginMap?: Record<string, string>;
   rules: PoolingRuleRow[];
   assignments: MonthlyAssignmentRow[];
   monthDays: { date: string; weekday: number; label: string }[];
@@ -305,6 +308,7 @@ export function ShiftManagerPanel({
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                 <tr>
                   <th className="px-4 py-2">Name</th>
+                  <th className="px-4 py-2">Log In</th>
                   <th className="px-4 py-2">Shift type</th>
                   <th className="px-4 py-2">Active</th>
                   <th className="px-4 py-2" />
@@ -313,7 +317,7 @@ export function ShiftManagerPanel({
               <tbody className="divide-y divide-slate-200/80">
                 {associates.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">
+                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">
                       No associates yet. Add one above.
                     </td>
                   </tr>
@@ -325,6 +329,15 @@ export function ShiftManagerPanel({
                         defaultValue={a.name}
                         id={`name-${a.id}`}
                         className="w-full max-w-xs rounded border border-slate-200 px-2 py-1"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        id={`login-${a.id}`}
+                        type="text"
+                        defaultValue={loginMap[a.id] ?? ""}
+                        placeholder="Enter login"
+                        className="w-full max-w-xs rounded border border-slate-200 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
                       />
                     </td>
                     <td className="px-4 py-2">
@@ -364,12 +377,17 @@ export function ShiftManagerPanel({
                         disabled={pending}
                         onClick={() => {
                           const name = (document.getElementById(`name-${a.id}`) as HTMLInputElement).value;
+                          const login = (document.getElementById(`login-${a.id}`) as HTMLInputElement).value;
                           const shift_type = (document.getElementById(`shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
                           const is_active = (document.getElementById(`active-${a.id}`) as HTMLInputElement).checked;
                           setError(null);
                           startTransition(async () => {
-                            const res = await updateAssociate({ id: a.id, name, shift_type, is_active });
-                            if (!res.ok) setError(res.error);
+                            const [assocRes, loginRes] = await Promise.all([
+                              updateAssociate({ id: a.id, name, shift_type, is_active }),
+                              saveAssociateLogin(a.id, login),
+                            ]);
+                            if (!assocRes.ok) setError(assocRes.error);
+                            else if (!loginRes.ok) setError(loginRes.error);
                             else router.refresh();
                           });
                         }}
@@ -459,25 +477,25 @@ export function ShiftManagerPanel({
                           </select>
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_sunday} id={`sun-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_sunday} id={`sun-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_monday} id={`mon-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_monday} id={`mon-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_tuesday} id={`tue-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_tuesday} id={`tue-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_wednesday} id={`wed-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_wednesday} id={`wed-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_thursday} id={`thu-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_thursday} id={`thu-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_friday} id={`fri-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_friday} id={`fri-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input type="checkbox" defaultChecked={r?.allow_saturday} id={`sat-${a.id}`} />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_saturday} id={`sat-${a.id}`} />
                         </td>
                       </tr>
                     );
