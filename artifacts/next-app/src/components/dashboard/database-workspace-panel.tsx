@@ -81,6 +81,7 @@ export function DatabaseWorkspacePanel({
   const [copied, setCopied] = useState(false);
   const [importMsg, setImportMsg] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [docsCollapsed, setDocsCollapsed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -241,23 +242,33 @@ export function DatabaseWorkspacePanel({
 
       {/* Main Source Docs */}
       <div className="overflow-hidden rounded-xl border-2 border-slate-300 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3">
+        <button
+          type="button"
+          onClick={() => setDocsCollapsed((c) => !c)}
+          className="flex w-full items-center justify-between border-b border-slate-200 bg-slate-50 px-4 py-3 text-left hover:bg-slate-100 transition-colors"
+        >
           <div>
             <h3 className="text-sm font-bold tracking-widest text-slate-700 uppercase">Main Source Docs</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               {entries.length} record{entries.length !== 1 ? "s" : ""} — imported from Word documents
             </p>
           </div>
-        </div>
+          <svg
+            className={`h-5 w-5 flex-shrink-0 text-slate-400 transition-transform duration-200 ${docsCollapsed ? "-rotate-90" : ""}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
 
-        {entries.length === 0 ? (
+        {!docsCollapsed && entries.length === 0 ? (
           <div className="px-6 py-10 text-center">
             <svg className="mx-auto mb-3 h-8 w-8 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             <p className="text-sm text-slate-500">No source documents yet. Import a Word (.docx) file to get started.</p>
           </div>
-        ) : (
+        ) : !docsCollapsed ? (
           <ul className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
             {entries.map((row) => (
               <li key={row.id}>
@@ -293,7 +304,7 @@ export function DatabaseWorkspacePanel({
               </li>
             ))}
           </ul>
-        )}
+        ) : null}
       </div>
 
       {/* Results */}
