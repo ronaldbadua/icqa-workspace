@@ -43,7 +43,9 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(
+    () => new Set([6, STAND_UP_2_HOUR])
+  );
   const [formByHour, setFormByHour] = useState<Record<number, FormState>>({});
   const [savedHours, setSavedHours] = useState<Set<number>>(new Set());
 
@@ -60,7 +62,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
       if (!d) return;
       setError(null);
       setFormByHour({});
-      setExpanded(null);
+      setExpanded(new Set([6, STAND_UP_2_HOUR]));
       setSavedHours(new Set());
       router.push(`/hourly-notes?date=${encodeURIComponent(d)}`);
     },
@@ -126,7 +128,11 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
         delete next[hour];
         return next;
       });
-      setExpanded((e) => (e === hour ? null : e));
+      setExpanded((e) => {
+        const next = new Set(e);
+        if (hour !== 6 && hour !== STAND_UP_2_HOUR) next.delete(hour);
+        return next;
+      });
       router.refresh();
     });
   };
@@ -180,7 +186,8 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
 
         <ul className="divide-y divide-slate-200/80 border-t border-slate-200/80">
           {slots.map((slot) => {
-            const isOpen = expanded === slot.hour;
+            const isStandUp = slot.hour === 6 || slot.hour === STAND_UP_2_HOUR;
+            const isOpen = isStandUp || expanded.has(slot.hour);
             const isSaved = savedHours.has(slot.hour);
             const rowTone =
               slot.status === "resolved"
@@ -211,21 +218,28 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       </span>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
-                    onClick={() => {
-                      setError(null);
-                      if (!isOpen) ensureForm(slot);
-                      setExpanded(isOpen ? null : slot.hour);
-                    }}
-                    aria-expanded={isOpen}
-                  >
-                    {isOpen ? "Collapse" : "Expand"}
-                    <span className="text-slate-400" aria-hidden>
-                      {isOpen ? "▴" : "▾"}
-                    </span>
-                  </button>
+                  {!isStandUp && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
+                      onClick={() => {
+                        setError(null);
+                        if (!isOpen) ensureForm(slot);
+                        setExpanded((e) => {
+                          const next = new Set(e);
+                          if (isOpen) next.delete(slot.hour);
+                          else next.add(slot.hour);
+                          return next;
+                        });
+                      }}
+                      aria-expanded={isOpen}
+                    >
+                      {isOpen ? "Collapse" : "Expand"}
+                      <span className="text-slate-400" aria-hidden>
+                        {isOpen ? "▴" : "▾"}
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 {isOpen ? (
