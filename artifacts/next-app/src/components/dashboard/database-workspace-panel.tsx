@@ -34,10 +34,12 @@ CREATE TRIGGER database_entries_updated_at
 
 ALTER TABLE public.database_entries ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS allow_all_authenticated ON public.database_entries
+DROP POLICY IF EXISTS allow_all_authenticated ON public.database_entries;
+CREATE POLICY allow_all_authenticated ON public.database_entries
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS allow_service_role ON public.database_entries
+DROP POLICY IF EXISTS allow_service_role ON public.database_entries;
+CREATE POLICY allow_service_role ON public.database_entries
   FOR ALL TO service_role USING (true) WITH CHECK (true);`;
 
 function highlight(text: string, query: string) {
