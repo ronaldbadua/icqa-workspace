@@ -42,3 +42,38 @@ export async function saveAssociatePScores(
   revalidatePath("/process-path");
   return { ok: true };
 }
+
+export async function saveAssociateLogin(
+  associate_id: string,
+  login: string
+): Promise<ActionResult> {
+  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
+  if (!supabase) return { ok: false, error: "Supabase is not configured." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+
+  // Try to update existing row first; insert if none exists
+  const { data: existing } = await db
+    .from("associate_p_scores")
+    .select("associate_id, p1, p2, p3")
+    .eq("associate_id", associate_id)
+    .maybeSingle();
+
+  const row = {
+    associate_id,
+    login,
+    p1: existing?.p1 ?? "",
+    p2: existing?.p2 ?? "",
+    p3: existing?.p3 ?? "",
+  };
+
+  const { error } = await db
+    .from("associate_p_scores")
+    .upsert(row, { onConflict: "associate_id" });
+
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/scheduling");
+  revalidatePath("/associate-table");
+  return { ok: true };
+}
