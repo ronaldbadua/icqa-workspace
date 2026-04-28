@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   deleteDatabaseEntryAction,
   importFromDocxAction,
@@ -348,22 +349,28 @@ export function DatabaseWorkspacePanel({
         ) : (
           <ul className="divide-y divide-slate-100 max-h-[28rem] overflow-y-auto">
             {results.map((row) => (
-              <li key={row.id} className="px-4 py-4">
-                <div className="flex items-start gap-2">
-                  <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <li key={row.id}>
+                <Link
+                  href={`/database/${row.id}?q=${encodeURIComponent(search)}`}
+                  className="flex items-start gap-3 px-4 py-4 hover:bg-sky-50 transition-colors group"
+                >
+                  <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-emerald-500 group-hover:text-sky-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                   </svg>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-slate-900">
+                    <p className="text-sm font-semibold text-slate-900 group-hover:text-sky-700 transition-colors">
                       {highlight(row.label, search)}
                     </p>
                     {row.notes ? (
-                      <p className="mt-1 text-sm text-slate-600 whitespace-pre-line leading-relaxed">
+                      <p className="mt-1 text-sm text-slate-600 whitespace-pre-line leading-relaxed line-clamp-3">
                         {highlight(row.notes, search)}
                       </p>
                     ) : null}
                   </div>
-                </div>
+                  <svg className="mt-0.5 h-4 w-4 flex-shrink-0 text-slate-300 group-hover:text-sky-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
               </li>
             ))}
           </ul>
