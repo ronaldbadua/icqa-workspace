@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ICQA Workspace — Personalize Dashboard",
   description: "Shared workspace for manager and associate collaboration — hourly notes, chat, scheduling, and process path.",
+  icons: { icon: "/favicon.svg" },
 };
 
 export default function RootLayout({
