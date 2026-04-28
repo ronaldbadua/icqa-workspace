@@ -6,17 +6,6 @@ export type DatabaseEntryRow = Database["public"]["Tables"]["database_entries"][
 const LABEL_MAX = 200;
 const NOTES_MAX = 50000;
 
-function mapDatabaseEntriesError(message: string) {
-  const lower = message.toLowerCase();
-  if (
-    lower.includes("database_entries") &&
-    (lower.includes("does not exist") || lower.includes("could not find the table"))
-  ) {
-    return "Database table 'database_entries' is missing. Run the latest Supabase migration, then reload this page.";
-  }
-  return message;
-}
-
 function normalizeLabel(raw: string) {
   return raw.trim().slice(0, LABEL_MAX);
 }
@@ -68,7 +57,7 @@ export async function listDatabaseEntries(
     .select("id, label, notes, data, created_at, updated_at, created_by")
     .order("updated_at", { ascending: false });
   if (error) {
-    return { data: [], error: mapDatabaseEntriesError(error.message) };
+    return { data: [], error: error.message };
   }
   return { data: (data ?? []) as DatabaseEntryRow[], error: null };
 }
@@ -83,7 +72,7 @@ export async function getDatabaseEntryById(
     .eq("id", id)
     .maybeSingle();
   if (error) {
-    return { data: null, error: mapDatabaseEntriesError(error.message) };
+    return { data: null, error: error.message };
   }
   return { data: (data as DatabaseEntryRow) ?? null, error: null };
 }
@@ -102,7 +91,7 @@ export async function insertDatabaseEntry(
     .select("id")
     .single();
   if (error) {
-    return { data: null, error: mapDatabaseEntriesError(error.message) };
+    return { data: null, error: error.message };
   }
   return { data, error: null };
 }
@@ -120,7 +109,7 @@ export async function updateDatabaseEntry(
     .from("database_entries")
     .update({ label: v.label, notes: v.notes, data: v.data })
     .eq("id", id);
-  return { error: error ? mapDatabaseEntriesError(error.message) : null };
+  return { error: error?.message ?? null };
 }
 
 export async function deleteDatabaseEntry(
@@ -128,5 +117,5 @@ export async function deleteDatabaseEntry(
   id: string
 ): Promise<{ error: string | null }> {
   const { error } = await supabase.from("database_entries").delete().eq("id", id);
-  return { error: error ? mapDatabaseEntriesError(error.message) : null };
+  return { error: error?.message ?? null };
 }
