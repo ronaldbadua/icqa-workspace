@@ -103,6 +103,15 @@ export async function getChatMessages(limit = 200) {
   return { messages: (data ?? []) as ChatMessage[], error: null };
 }
 
+export type SourceEntry = {
+  id: string;
+  label: string;
+  notes: string;
+  sort_order: number | null;
+  source_file: string | null;
+  created_at: string;
+};
+
 export async function getDatabaseEntry(id: string) {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { entry: null, error: "missing_config" as const };
@@ -110,6 +119,63 @@ export async function getDatabaseEntry(id: string) {
   const { data, error } = await getDatabaseEntryById(supabase, id);
   if (error) return { entry: null, error };
   return { entry: data, error: null };
+}
+
+export async function getDatabaseSourceDocument(id: string): Promise<{
+  focusEntry: SourceEntry | null;
+  allEntries: SourceEntry[];
+  sourceFile: string | null;
+  error: string | null;
+}> {
+  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
+  if (!supabase) return { focusEntry: null, allEntries: [], sourceFile: null, error: "missing_config" };
+
+  // Fetch the clicked entry including optional new columns
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: focusRaw, error: focusErr } = await (supabase as any)
+    .from("database_entries")
+    .select("id, label, notes, sort_order, source_file, created_at")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (focusErr) return { focusEntry: null, allEntries: [], sourceFile: null, error: (focusErr as { message: string }).message };
+  if (!focusRaw) return { focusEntry: null, allEntries: [], sourceFile: null, error: null };
+
+  const focus = focusRaw as SourceEntry;
+  const sourceFile: string | null = focus.source_file ?? null;
+
+  let allEntries: SourceEntry[] = [];
+
+  if (sourceFile) {
+    // Fetch all entries from the same source file, ordered by sort_order
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from("database_entries")
+      .select("id, label, notes, sort_order, source_file, created_at")
+      .eq("source_file", sourceFile)
+      .order("sort_order", { ascending: true });
+    if (!error && data) allEntries = data as SourceEntry[];
+  } else {
+    // Fallback: group by same-second created_at (records from same import batch)
+    const ts = focus.created_at.slice(0, 19); // "YYYY-MM-DDTHH:MM:SS"
+    const from = ts + ".000Z";
+    const to = ts + ".999Z";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase as any)
+      .from("database_entries")
+      .select("id, label, notes, sort_order, source_file, created_at")
+      .gte("created_at", from)
+      .lte("created_at", to)
+      .order("created_at", { ascending: true });
+    if (!error && data && (data as SourceEntry[]).length > 1) {
+      allEntries = data as SourceEntry[];
+    } else {
+      // Last resort: just show the single entry
+      allEntries = [focus];
+    }
+  }
+
+  return { focusEntry: focus, allEntries, sourceFile, error: null };
 }
 
 export async function getDatabaseEntries() {
