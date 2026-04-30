@@ -203,7 +203,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                 <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
                   <div className="flex min-w-0 items-center gap-2">
                     {slot.hour === 6 || slot.hour === STAND_UP_2_HOUR ? (
-                      <span className="text-[2.2rem] font-bold text-blue-600 leading-none">
+                      <span className="text-[1.1rem] font-bold text-blue-600 leading-none">
                         {formatHourLabel(slot.hour)}
                       </span>
                     ) : (
@@ -218,28 +218,26 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       </span>
                     ) : null}
                   </div>
-                  {!isStandUp && (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
-                      onClick={() => {
-                        setError(null);
-                        if (!isOpen) ensureForm(slot);
-                        setExpanded((e) => {
-                          const next = new Set(e);
-                          if (isOpen) next.delete(slot.hour);
-                          else next.add(slot.hour);
-                          return next;
-                        });
-                      }}
-                      aria-expanded={isOpen}
-                    >
-                      {isOpen ? "Collapse" : "Expand"}
-                      <span className="text-slate-400" aria-hidden>
-                        {isOpen ? "▴" : "▾"}
-                      </span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
+                    onClick={() => {
+                      setError(null);
+                      if (!isOpen) ensureForm(slot);
+                      setExpanded((e) => {
+                        const next = new Set(e);
+                        if (isOpen) next.delete(slot.hour);
+                        else next.add(slot.hour);
+                        return next;
+                      });
+                    }}
+                    aria-expanded={isOpen}
+                  >
+                    {isOpen ? "Collapse" : "Expand"}
+                    <span className="text-slate-400" aria-hidden>
+                      {isOpen ? "▴" : "▾"}
+                    </span>
+                  </button>
                 </div>
 
                 {isOpen ? (
