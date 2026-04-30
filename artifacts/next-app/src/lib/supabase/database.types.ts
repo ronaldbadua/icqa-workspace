@@ -50,6 +50,21 @@ export interface Database {
         };
         Relationships: [];
       };
+      chat_reads: {
+        Row: {
+          user_id: string;
+          last_read_at: string;
+        };
+        Insert: {
+          user_id: string;
+          last_read_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          last_read_at?: string;
+        };
+        Relationships: [];
+      };
       chat_messages: {
         Row: {
           id: string;
