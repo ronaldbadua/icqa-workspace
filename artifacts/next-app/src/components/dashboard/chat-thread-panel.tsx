@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { sendChatMessage, deleteChatMessage } from "@/app/actions/chat";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 
 type Msg = { id: string; body: string; author_name: string; user_id: string; created_at: string };
 
@@ -47,12 +48,18 @@ function mergeMessages(prev: Msg[], incoming: Msg[]): Msg[] {
   return next.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
+const REALTIME_SETUP_SQL = `-- Run this once in your Supabase SQL Editor to enable live chat
+ALTER PUBLICATION supabase_realtime ADD TABLE chat_messages;
+NOTIFY pgrst, 'reload schema';`;
+
 export function ChatThreadPanel({ initialMessages, hasSupabase, currentUserId, currentUserName }: Props) {
   const [messages, setMessages] = useState<Msg[]>(initialMessages);
   const [body, setBody] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  const [copied, setCopied] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<Msg[]>(initialMessages);
@@ -93,48 +100,70 @@ export function ChatThreadPanel({ initialMessages, hasSupabase, currentUserId, c
     const supabase = createBrowserSupabaseClient();
     if (!supabase) return;
 
-    let channel = supabase
-      .channel("icqa_chat_v4", { config: { broadcast: { self: false } } })
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "chat_messages" },
-        (payload) => {
-          addMessages([payload.new as Msg]);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "DELETE", schema: "public", table: "chat_messages" },
-        (payload) => {
-          const o = payload.old as { id?: string };
-          if (o.id) setMessages((prev) => prev.filter((m) => m.id !== o.id));
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setRealtimeConnected(true);
-          // Fetch once on successful subscription to catch any missed messages
-          void fetchMessages();
-        } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
-          setRealtimeConnected(false);
-        }
-      });
+    let channel: RealtimeChannel | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let destroyed = false;
+
+    const subscribe = () => {
+      if (destroyed) return;
+      channel = supabase
+        .channel(`icqa_chat_v5_${Date.now()}`, { config: { broadcast: { self: false } } })
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "chat_messages" },
+          (payload) => { addMessages([payload.new as Msg]); }
+        )
+        .on(
+          "postgres_changes",
+          { event: "DELETE", schema: "public", table: "chat_messages" },
+          (payload) => {
+            const o = payload.old as { id?: string };
+            if (o.id) setMessages((prev) => prev.filter((m) => m.id !== o.id));
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            setRealtimeConnected(true);
+            void fetchMessages(); // catch any missed messages
+          } else if (status === "CLOSED" || status === "CHANNEL_ERROR") {
+            setRealtimeConnected(false);
+            // Auto-reconnect after 3 s
+            if (!destroyed) {
+              reconnectTimer = setTimeout(() => {
+                if (channel) void supabase.removeChannel(channel);
+                subscribe();
+              }, 3000);
+            }
+          }
+        });
+    };
+
+    subscribe();
 
     return () => {
+      destroyed = true;
       setRealtimeConnected(false);
-      void supabase.removeChannel(channel);
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [hasSupabase, addMessages, fetchMessages]);
 
-  // ── Polling fallback — 2 s interval, always on ───────────────────────────
-  // Works regardless of whether Realtime is enabled in Supabase.
-  // Messages are deduped so there's no flicker or duplication.
+  // ── Polling fallback — 1 s interval, always on ───────────────────────────
+  // Works regardless of whether Realtime is enabled for the table in Supabase.
+  // Messages are deduped so there is no flicker or duplication.
   useEffect(() => {
     if (!hasSupabase) return;
     void fetchMessages(); // immediate first poll
-    const id = setInterval(fetchMessages, 2000);
+    const id = setInterval(fetchMessages, 1000);
     return () => clearInterval(id);
   }, [hasSupabase, fetchMessages]);
+
+  const copySetupSql = () => {
+    navigator.clipboard.writeText(REALTIME_SETUP_SQL).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
 
   // ── Send ─────────────────────────────────────────────────────────────────
   const onSend = (e?: React.FormEvent) => {
@@ -185,17 +214,47 @@ export function ChatThreadPanel({ initialMessages, hasSupabase, currentUserId, c
       style={{ height: "calc(100vh - 220px)", minHeight: "480px" }}
     >
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-slate-200/80 bg-white px-5 py-3.5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-sm font-bold text-white">IC</div>
-        <div className="flex-1">
-          <p className="text-sm font-semibold text-slate-900">ICQA Team Chat</p>
-          <p className="text-xs text-slate-500">Manager &amp; associate real-time messaging</p>
+      <div className="border-b border-slate-200/80 bg-white">
+        <div className="flex items-center gap-3 px-5 py-3.5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600 text-sm font-bold text-white">IC</div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-900">ICQA Team Chat</p>
+            <p className="text-xs text-slate-500">Manager &amp; associate real-time messaging</p>
+          </div>
+          {/* Realtime indicator */}
+          <button
+            type="button"
+            onClick={() => setShowSetup((s) => !s)}
+            className="flex items-center gap-1.5 rounded-full px-2 py-1 hover:bg-slate-100 transition"
+            title={realtimeConnected ? "Live — Realtime connected" : "Polling — click to enable Live mode"}
+          >
+            <span className={`h-2 w-2 rounded-full ${realtimeConnected ? "bg-emerald-500 animate-pulse" : "bg-amber-400"}`} />
+            <span className="text-[10px] text-slate-400">{realtimeConnected ? "Live" : "Polling (1s)"}</span>
+          </button>
         </div>
-        {/* Realtime indicator */}
-        <div className="flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${realtimeConnected ? "bg-emerald-500" : "bg-amber-400"}`} />
-          <span className="text-[10px] text-slate-400">{realtimeConnected ? "Live" : "Polling"}</span>
-        </div>
+
+        {/* Realtime setup banner — visible when not connected */}
+        {showSetup && (
+          <div className="border-t border-amber-100 bg-amber-50 px-5 py-3">
+            <p className="text-xs font-semibold text-amber-900 mb-1">Enable Realtime (instant updates)</p>
+            <p className="text-xs text-amber-800 mb-2">
+              Run this SQL once in your <strong>Supabase project → SQL Editor</strong>:
+            </p>
+            <pre className="overflow-x-auto rounded-md bg-amber-100 px-3 py-2 font-mono text-[11px] leading-relaxed text-amber-900">
+{REALTIME_SETUP_SQL}
+            </pre>
+            <button
+              type="button"
+              onClick={copySetupSql}
+              className="mt-2 rounded-md bg-amber-200 px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-300 transition"
+            >
+              {copied ? "Copied ✓" : "Copy SQL"}
+            </button>
+            <p className="mt-2 text-[10px] text-amber-700">
+              Chat still works in polling mode (updates every 1 s) even without this step.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Error banner */}
