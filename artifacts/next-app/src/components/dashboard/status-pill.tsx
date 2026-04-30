@@ -19,7 +19,7 @@ export function StatusPill({
 }) {
   return (
     <div
-      className={`inline-flex min-w-[8rem] flex-1 items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-medium ${variants[tone]}`}
+      className={`inline-flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-medium ${variants[tone]}`}
     >
       <span>{label}</span>
       <span className="font-semibold tabular-nums">{value}</span>
