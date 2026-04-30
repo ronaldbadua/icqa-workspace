@@ -32,6 +32,17 @@ export async function sendChatMessage(
   return { ok: true, message: data as Msg };
 }
 
+export async function markChatAsRead(userId: string): Promise<ActionResult> {
+  if (!userId) return { ok: false, error: "No user." };
+  const supabase = await getClient();
+  if (!supabase) return { ok: false, error: "Supabase not configured." };
+  const { error } = await supabase
+    .from("chat_reads")
+    .upsert({ user_id: userId, last_read_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 export async function deleteChatMessage(id: string): Promise<ActionResult> {
   const supabase = await getClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
