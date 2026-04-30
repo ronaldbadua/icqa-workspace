@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, useCallback } from "react";
+import { useMemo, useState, useTransition, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { upsertHourlyNote, deleteHourlyNote } from "@/app/actions/hourly-notes";
 import type { HourlyNoteStatus } from "@/lib/supabase/database.types";
@@ -38,12 +38,19 @@ function slotToForm(slot: HourlySlot): FormState {
   };
 }
 
+/** All regular hours start expanded; Stand Up rows (h=6 and STAND_UP_2_HOUR) start collapsed. */
+function buildDefaultExpanded(): Set<number> {
+  const s = new Set<number>();
+  for (let h = 7; h <= HOURLY_NOTES_HOUR_END; h++) s.add(h);
+  return s;
+}
+
 export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotesPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<number>>(buildDefaultExpanded);
   const [formByHour, setFormByHour] = useState<Record<number, FormState>>({});
   const [savedHours, setSavedHours] = useState<Set<number>>(new Set());
 
@@ -60,7 +67,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
       if (!d) return;
       setError(null);
       setFormByHour({});
-      setExpanded(new Set());
+      setExpanded(buildDefaultExpanded());
       setSavedHours(new Set());
       router.push(`/hourly-notes?date=${encodeURIComponent(d)}`);
     },
@@ -71,6 +78,22 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
     if (formByHour[slot.hour]) return;
     setFormByHour((prev) => ({ ...prev, [slot.hour]: slotToForm(slot) }));
   };
+
+  // Pre-initialize form state for every slot so always-rendered form inputs
+  // display the correct persisted values even before the user interacts.
+  useEffect(() => {
+    setFormByHour((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const slot of slots) {
+        if (!next[slot.hour]) {
+          next[slot.hour] = slotToForm(slot);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [slots]);
 
   const getForm = (slot: HourlySlot): FormState =>
     formByHour[slot.hour] ?? slotToForm(slot);
@@ -126,11 +149,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
         delete next[hour];
         return next;
       });
-      setExpanded((e) => {
-        const next = new Set(e);
-        if (hour !== 6 && hour !== STAND_UP_2_HOUR) next.delete(hour);
-        return next;
-      });
+      // Keep the row open after clearing so the user can re-enter data
       router.refresh();
     });
   };
@@ -216,12 +235,12 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       </span>
                     ) : null}
                   </div>
+                  {/* Expand / Collapse toggle */}
                   <button
                     type="button"
-                    className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 hover:text-slate-900 active:scale-95"
                     onClick={() => {
                       setError(null);
-                      if (!isOpen) ensureForm(slot);
                       setExpanded((e) => {
                         const next = new Set(e);
                         if (isOpen) next.delete(slot.hour);
@@ -230,15 +249,30 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       });
                     }}
                     aria-expanded={isOpen}
+                    aria-label={isOpen ? "Collapse section" : "Expand section"}
                   >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className={`h-3.5 w-3.5 transition-transform duration-300 ${isOpen ? "rotate-180" : "rotate-0"}`}
+                      aria-hidden
+                    >
+                      <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                    </svg>
                     {isOpen ? "Collapse" : "Expand"}
-                    <span className="text-slate-400" aria-hidden>
-                      {isOpen ? "▴" : "▾"}
-                    </span>
                   </button>
                 </div>
 
-                {isOpen ? (
+                {/* Animated accordion body — always mounted for smooth transition */}
+                <div
+                  className="overflow-hidden"
+                  style={{
+                    maxHeight: isOpen ? "800px" : "0px",
+                    opacity: isOpen ? 1 : 0,
+                    transition: "max-height 0.35s ease-in-out, opacity 0.25s ease-in-out",
+                  }}
+                >
                   <div className="border-t border-slate-200/60 bg-white/90 px-5 py-4 space-y-3">
                     <div>
                       <FormLabel>Status</FormLabel>
@@ -330,7 +364,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       </button>
                     </div>
                   </div>
-                ) : null}
+                </div>
               </li>
             );
           })}
