@@ -218,26 +218,28 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
                       </span>
                     ) : null}
                   </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
-                    onClick={() => {
-                      setError(null);
-                      if (!isOpen) ensureForm(slot);
-                      setExpanded((e) => {
-                        const next = new Set(e);
-                        if (isOpen) next.delete(slot.hour);
-                        else next.add(slot.hour);
-                        return next;
-                      });
-                    }}
-                    aria-expanded={isOpen}
-                  >
-                    {isOpen ? "Collapse" : "Expand"}
-                    <span className="text-slate-400" aria-hidden>
-                      {isOpen ? "▴" : "▾"}
-                    </span>
-                  </button>
+                  {!isStandUp && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900"
+                      onClick={() => {
+                        setError(null);
+                        if (!isOpen) ensureForm(slot);
+                        setExpanded((e) => {
+                          const next = new Set(e);
+                          if (isOpen) next.delete(slot.hour);
+                          else next.add(slot.hour);
+                          return next;
+                        });
+                      }}
+                      aria-expanded={isOpen}
+                    >
+                      {isOpen ? "Collapse" : "Expand"}
+                      <span className="text-slate-400" aria-hidden>
+                        {isOpen ? "▴" : "▾"}
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 {isOpen ? (
