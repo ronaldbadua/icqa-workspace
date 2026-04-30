@@ -175,7 +175,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
         </div>
 
         <div className="px-5 py-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
             <StatusPill label="No Actions Needed" value={summary.noActionNeeded} tone="info" />
             <StatusPill label="Resolved" value={summary.resolved} tone="success" />
             <StatusPill label="Pending" value={summary.pending} tone="warning" />
@@ -200,8 +200,8 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
             const f = getForm(slot);
             return (
               <li key={slot.hour} className={rowTone}>
-                <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
-                  <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-5 py-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
                     {slot.hour === 6 || slot.hour === STAND_UP_2_HOUR ? (
                       <span className="text-[1.1rem] font-bold text-blue-600 leading-none">
                         {formatHourLabel(slot.hour)}
