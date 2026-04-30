@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "@/app/actions/auth";
+import { ChatUnreadBadge } from "@/components/dashboard/chat-unread-badge";
 
 const items = [
   { href: "/hourly-notes", label: "Hourly Notes" },
@@ -22,9 +23,11 @@ const TRANSLATE_AMOUNT = SIDEBAR_WIDTH - TAB_WIDTH;
 
 interface SidebarProps {
   email?: string | null;
+  userId?: string | null;
+  initialUnreadCount?: number;
 }
 
-export function Sidebar({ email }: SidebarProps) {
+export function Sidebar({ email, userId, initialUnreadCount = 0 }: SidebarProps) {
   const pathname = usePathname();
   const [open, setOpen] = useState(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -134,11 +137,16 @@ export function Sidebar({ email }: SidebarProps) {
                   ].join(" ")}
                 >
                   <span>{item.label}</span>
-                  {active ? (
-                    <span className="text-white/90" aria-hidden>
-                      →
-                    </span>
-                  ) : null}
+                  <span className="flex items-center gap-1">
+                    {item.href === "/chat" && userId ? (
+                      <ChatUnreadBadge userId={userId} initialCount={initialUnreadCount} />
+                    ) : null}
+                    {active ? (
+                      <span className="text-white/90" aria-hidden>
+                        →
+                      </span>
+                    ) : null}
+                  </span>
                 </Link>
               );
             })}
