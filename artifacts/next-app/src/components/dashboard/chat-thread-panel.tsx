@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { sendChatMessage, deleteChatMessage } from "@/app/actions/chat";
+import { sendChatMessage, deleteChatMessage, markChatAsRead } from "@/app/actions/chat";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 type Msg = { id: string; body: string; author_name: string; user_id: string; created_at: string };
@@ -48,8 +48,26 @@ function mergeMessages(prev: Msg[], incoming: Msg[]): Msg[] {
   return next.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
-const REALTIME_SETUP_SQL = `-- Run this once in your Supabase SQL Editor to enable live chat
+const REALTIME_SETUP_SQL = `-- Run this once in Supabase SQL Editor to enable live chat + unread badges
+
+-- 1. Enable Realtime for chat tables
 ALTER PUBLICATION supabase_realtime ADD TABLE chat_messages;
+
+-- 2. Create the chat_reads table (tracks last-read position per user)
+CREATE TABLE IF NOT EXISTS chat_reads (
+  user_id UUID PRIMARY KEY,
+  last_read_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE chat_reads ENABLE ROW LEVEL SECURITY;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE tablename = 'chat_reads' AND policyname = 'allow_own_reads'
+  ) THEN
+    CREATE POLICY allow_own_reads ON chat_reads
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
+
 NOTIFY pgrst, 'reload schema';`;
 
 export function ChatThreadPanel({ initialMessages, hasSupabase, currentUserId, currentUserName }: Props) {
@@ -63,6 +81,11 @@ export function ChatThreadPanel({ initialMessages, hasSupabase, currentUserId, c
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<Msg[]>(initialMessages);
+
+  // Mark all messages as read when the chat panel mounts (user opened the tab)
+  useEffect(() => {
+    if (currentUserId) void markChatAsRead(currentUserId);
+  }, [currentUserId]);
 
   // keep ref in sync so closures always see fresh messages
   useEffect(() => { messagesRef.current = messages; }, [messages]);
