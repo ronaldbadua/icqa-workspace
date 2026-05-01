@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   addAssociate,
@@ -8,7 +8,7 @@ import {
   deleteAssociate,
   updateAssociate,
   upsertAssignment,
-  upsertPoolingRules,
+  upsertPoolingRule,
 } from "@/app/actions/scheduling";
 import { saveAssociateLogin } from "@/app/actions/associate-table";
 import type { AssociateRow, MonthlyAssignmentRow, PoolingRuleRow } from "@/lib/data/queries";
@@ -26,65 +26,6 @@ import { FormLabel } from "@/components/dashboard/status-pill";
 
 type TabId = "shift" | "associates" | "pooling";
 const POOLING_SHIFT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time"];
-
-/** Label from `associate_p_scores.login` (DB `associates.name` mirrors login for compatibility). */
-function associateLoginLabel(loginMap: Record<string, string>, associateId: string) {
-  const v = (loginMap[associateId] ?? "").trim();
-  return v.length > 0 ? v : "—";
-}
-
-type AssocRowDraft = { login: string; shift_type: ShiftType; is_active: boolean };
-
-type PoolRowDraft = {
-  shift_type: ShiftType;
-  allow_sunday: boolean;
-  allow_monday: boolean;
-  allow_tuesday: boolean;
-  allow_wednesday: boolean;
-  allow_thursday: boolean;
-  allow_friday: boolean;
-  allow_saturday: boolean;
-};
-
-function buildAssocDraftMap(
-  associates: AssociateRow[],
-  loginMap: Record<string, string>
-): Record<string, AssocRowDraft> {
-  return Object.fromEntries(
-    associates.map((a) => [
-      a.id,
-      {
-        login: loginMap[a.id] ?? "",
-        shift_type: a.shift_type,
-        is_active: a.is_active,
-      },
-    ])
-  );
-}
-
-function buildPoolDraftMap(
-  associates: AssociateRow[],
-  ruleByAssoc: Map<string, PoolingRuleRow>
-): Record<string, PoolRowDraft> {
-  return Object.fromEntries(
-    associates.map((a) => {
-      const r = ruleByAssoc.get(a.id);
-      return [
-        a.id,
-        {
-          shift_type: a.shift_type,
-          allow_sunday: Boolean(r?.allow_sunday),
-          allow_monday: Boolean(r?.allow_monday),
-          allow_tuesday: Boolean(r?.allow_tuesday),
-          allow_wednesday: Boolean(r?.allow_wednesday),
-          allow_thursday: Boolean(r?.allow_thursday),
-          allow_friday: Boolean(r?.allow_friday),
-          allow_saturday: Boolean(r?.allow_saturday),
-        },
-      ];
-    })
-  );
-}
 
 function buildWeeks(days: { date: string; weekday: number; label: string }[]) {
   if (!days.length) return [] as ({ date: string; weekday: number; label: string } | null)[][];
@@ -136,59 +77,6 @@ export function ShiftManagerPanel({
   const ruleByAssoc = useMemo(() => new Map(rules.map((r) => [r.associate_id, r])), [rules]);
   const weeks = useMemo(() => buildWeeks(monthDays), [monthDays]);
 
-  const loginMapKey = useMemo(() => JSON.stringify(loginMap), [loginMap]);
-  const [newLogin, setNewLogin] = useState("");
-  const [newShiftType, setNewShiftType] = useState<ShiftType>("FHD");
-  const [assocDrafts, setAssocDrafts] = useState<Record<string, AssocRowDraft>>(() =>
-    buildAssocDraftMap(associates, loginMap)
-  );
-  const [poolDrafts, setPoolDrafts] = useState<Record<string, PoolRowDraft>>(() =>
-    buildPoolDraftMap(associates, new Map(rules.map((r) => [r.associate_id, r])))
-  );
-
-  const serverMainByDate = useMemo(() => {
-    const m: Record<string, string | null> = {};
-    for (const d of monthDays) {
-      const row = byAssign.get(`${d.date}::main`);
-      m[d.date] = row?.associate_id ?? null;
-    }
-    return m;
-  }, [monthDays, byAssign]);
-
-  const [mainAssignDraft, setMainAssignDraft] = useState<Record<string, string | null>>({});
-
-  useEffect(() => {
-    setAssocDrafts(buildAssocDraftMap(associates, loginMap));
-  }, [associates, loginMapKey]);
-
-  const rulesFingerprint = useMemo(
-    () =>
-      rules
-        .map((r) =>
-          [
-            r.associate_id,
-            r.allow_sunday,
-            r.allow_monday,
-            r.allow_tuesday,
-            r.allow_wednesday,
-            r.allow_thursday,
-            r.allow_friday,
-            r.allow_saturday,
-          ].join(",")
-        )
-        .join("|"),
-    [rules]
-  );
-
-  useEffect(() => {
-    const rb = new Map(rules.map((r) => [r.associate_id, r]));
-    setPoolDrafts(buildPoolDraftMap(associates, rb));
-  }, [associates, rulesFingerprint]);
-
-  useEffect(() => {
-    setMainAssignDraft({ ...serverMainByDate });
-  }, [serverMainByDate]);
-
   const shiftMonth = (dir: -1 | 1) => {
     const d = addMonths(parseYm(ym), dir);
     router.push(`/scheduling?month=${encodeURIComponent(toYm(d))}`);
@@ -206,147 +94,13 @@ export function ShiftManagerPanel({
     });
   };
 
-  const saveMainAssignments = () => {
-    if (!hasSupabase) {
-      setError("Configure Supabase to save.");
-      return;
-    }
-    setError(null);
-    setSuccess(null);
-    const norm = (x: string | null | undefined) => (x && String(x).length > 0 ? x : null);
-    startTransition(async () => {
-      let changed = false;
-      for (const d of monthDays) {
-        const date = d.date;
-        const serverId = norm(serverMainByDate[date]);
-        const rawDraft = mainAssignDraft[date];
-        const draftId = rawDraft === undefined ? serverId : norm(rawDraft);
-        if (draftId === serverId) continue;
-        const mainRow = byAssign.get(`${date}::main`);
-        const slot = mainRow?.slot_type ?? defaultSlotTypeForDate(date);
-        if (slot === "Vacation") continue;
-        const res = await upsertAssignment({
-          assignment_date: date,
-          role: "main",
-          slot_type: slot,
-          associate_id: draftId,
-        });
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
-        changed = true;
-      }
-      if (!changed) {
-        setSuccess("No schedule changes to save.");
-        return;
-      }
-      setSuccess("Schedule changes saved.");
-      router.refresh();
-    });
-  };
-
-  const saveAssocDrafts = () => {
-    if (!hasSupabase) {
-      setError("Configure Supabase to save.");
-      return;
-    }
+  const onSlotOrAssign = (date: string, role: AssignmentRole, slot: ShiftType, associateId: string | null) => {
+    if (!hasSupabase) { setError("Configure Supabase to save."); return; }
     setError(null);
     setSuccess(null);
     startTransition(async () => {
-      let changed = false;
-      for (const a of associates) {
-        const d = assocDrafts[a.id];
-        if (!d) continue;
-        const serverLogin = loginMap[a.id] ?? "";
-        if (d.login === serverLogin && d.shift_type === a.shift_type && d.is_active === a.is_active) continue;
-        const loginForDb = d.login.trim() || (loginMap[a.id] ?? "").trim();
-        if (!loginForDb) {
-          setError("Associate login is required for every row before saving.");
-          return;
-        }
-        const [assocRes, loginRes] = await Promise.all([
-          updateAssociate({
-            id: a.id,
-            login: loginForDb,
-            shift_type: d.shift_type,
-            is_active: d.is_active,
-          }),
-          saveAssociateLogin(a.id, d.login),
-        ]);
-        if (!assocRes.ok) {
-          setError(assocRes.error);
-          return;
-        }
-        if (!loginRes.ok) {
-          setError(loginRes.error);
-          return;
-        }
-        changed = true;
-      }
-      if (!changed) {
-        setSuccess("No associate changes to save.");
-        return;
-      }
-      setSuccess("Associate changes saved.");
-      router.refresh();
-    });
-  };
-
-  const savePoolDrafts = () => {
-    if (!hasSupabase) {
-      setError("Configure Supabase to save.");
-      return;
-    }
-    setError(null);
-    setSuccess(null);
-    startTransition(async () => {
-      const serverPool = buildPoolDraftMap(associates, ruleByAssoc);
-      let poolDirty = false;
-      for (const a of associates) {
-        const d = poolDrafts[a.id];
-        const s = serverPool[a.id];
-        if (!d || !s) continue;
-        if (JSON.stringify(d) !== JSON.stringify(s)) poolDirty = true;
-      }
-      if (!poolDirty) {
-        setSuccess("No pooling changes to save.");
-        return;
-      }
-      for (const a of associates) {
-        const d = poolDrafts[a.id];
-        if (!d) continue;
-        const loginTrim = (loginMap[a.id] ?? "").trim() || "Associate";
-        const assocRes = await updateAssociate({
-          id: a.id,
-          login: loginTrim,
-          shift_type: d.shift_type,
-          is_active: a.is_active,
-        });
-        if (!assocRes.ok) {
-          setError(assocRes.error);
-          return;
-        }
-      }
-      const rulesPayload = associates.map((a) => {
-        const d = poolDrafts[a.id]!;
-        return {
-          associate_id: a.id,
-          allow_sunday: d.allow_sunday,
-          allow_monday: d.allow_monday,
-          allow_tuesday: d.allow_tuesday,
-          allow_wednesday: d.allow_wednesday,
-          allow_thursday: d.allow_thursday,
-          allow_friday: d.allow_friday,
-          allow_saturday: d.allow_saturday,
-        };
-      });
-      const ruleRes = await upsertPoolingRules(rulesPayload);
-      if (!ruleRes.ok) {
-        setError(ruleRes.error);
-        return;
-      }
-      setSuccess("Pooling rules saved.");
+      const res = await upsertAssignment({ assignment_date: date, role, slot_type: slot, associate_id: associateId });
+      if (!res.ok) { setError(res.error); return; }
       router.refresh();
     });
   };
@@ -458,9 +212,7 @@ export function ShiftManagerPanel({
         <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
           <div className="border-b border-slate-200/80 px-4 py-3">
             <h3 className="text-sm font-bold text-slate-900">Monthly Schedule</h3>
-            <p className="text-xs text-slate-500">
-              Pick assignees per day below, then use <strong>Save schedule</strong> at the bottom to sync to Supabase (no refresh while editing).
-            </p>
+            <p className="text-xs text-slate-500">One associate per day, pulled from Pooling rules. Saved to your database — navigate months freely.</p>
           </div>
           <div className="overflow-x-auto p-3">
             <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
@@ -475,9 +227,7 @@ export function ShiftManagerPanel({
                   const date = cell.date;
                   const mainRow = byAssign.get(`${date}::main`);
                   const slot = mainRow?.slot_type ?? defaultSlotTypeForDate(date);
-                  const draftVal = mainAssignDraft[date];
-                  const selectValue =
-                    draftVal === undefined ? (serverMainByDate[date] ?? "") : draftVal ?? "";
+                  const mainId = mainRow?.associate_id ?? "";
                   const mainOpts = eligibleOptions(date, slot, "main", []);
 
                   return (
@@ -486,21 +236,13 @@ export function ShiftManagerPanel({
                       <div className="mt-1">
                         <select
                           className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-slate-800 focus:outline-none"
-                          value={selectValue}
+                          value={mainId}
                           disabled={pending || slot === "Vacation"}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            setMainAssignDraft((prev) => ({
-                              ...prev,
-                              [date]: v.length > 0 ? v : null,
-                            }));
-                          }}
+                          onChange={(e) => onSlotOrAssign(date, "main", slot, e.target.value || null)}
                         >
                           <option value="">—</option>
                           {mainOpts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {associateLoginLabel(loginMap, a.id)}
-                            </option>
+                            <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
                           ))}
                         </select>
                       </div>
@@ -510,16 +252,6 @@ export function ShiftManagerPanel({
               </div>
             ))}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/80 bg-slate-50/60 px-4 py-3">
-            <button
-              type="button"
-              disabled={pending || !hasSupabase}
-              onClick={() => saveMainAssignments()}
-              className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Save schedule"}
-            </button>
-          </div>
         </div>
       ) : null}
 
@@ -528,8 +260,7 @@ export function ShiftManagerPanel({
           <div className="border-b border-slate-200/80 px-4 py-3">
             <h3 className="text-sm font-bold text-slate-900">Associates List</h3>
             <p className="text-xs text-slate-500">
-              Edit rows below (all changes stay local), then click <strong>Save changes</strong> to sync. Use + Add to create a
-              new associate immediately.
+              Add names and configure each associate&rsquo;s shift type and pooling eligibility. All changes save permanently to your database.
             </p>
           </div>
 
@@ -537,42 +268,32 @@ export function ShiftManagerPanel({
             className="flex flex-wrap items-end gap-2 border-b border-slate-200/60 bg-slate-50/60 px-4 py-3"
             onSubmit={(e) => {
               e.preventDefault();
-              const login = newLogin.trim();
-              if (!login) {
-                setError("Associate login is required.");
-                return;
-              }
+              const fd = new FormData(e.currentTarget);
+              const login = String(fd.get("login") || "").trim();
+              const shift_type = String(fd.get("shift_type") || "FHD") as ShiftType;
+              if (!login) { setError("Login is required."); return; }
               setError(null);
               setSuccess(null);
               startTransition(async () => {
-                const res = await addAssociate(login, newShiftType);
-                if (!res.ok) {
-                  setError(res.error);
-                  return;
-                }
-                setNewLogin("");
-                setNewShiftType("FHD");
+                const res = await addAssociate(login, shift_type);
+                if (!res.ok) { setError(res.error); return; }
+                (e.target as HTMLFormElement).reset();
                 setSuccess("Associate added.");
                 router.refresh();
               });
             }}
           >
             <div className="min-w-[12rem] flex-1">
-              <FormLabel>Associate Login</FormLabel>
+              <FormLabel>Login</FormLabel>
               <input
-                value={newLogin}
-                onChange={(e) => setNewLogin(e.target.value)}
+                name="login"
                 className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
                 placeholder="Enter associate login"
               />
             </div>
             <div className="w-36">
               <FormLabel>Shift type</FormLabel>
-              <select
-                value={newShiftType}
-                onChange={(e) => setNewShiftType(e.target.value as ShiftType)}
-                className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-              >
+              <select name="shift_type" className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm" defaultValue="FHD">
                 {SLOT_TYPES.map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
@@ -587,7 +308,7 @@ export function ShiftManagerPanel({
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-2">Associate Login</th>
+                  <th className="px-4 py-2">Log In</th>
                   <th className="px-4 py-2">Shift type</th>
                   <th className="px-4 py-2">Active</th>
                   <th className="px-4 py-2" />
@@ -601,90 +322,75 @@ export function ShiftManagerPanel({
                     </td>
                   </tr>
                 ) : null}
-                {associates.map((a) => {
-                  const base: AssocRowDraft = {
-                    login: loginMap[a.id] ?? "",
-                    shift_type: a.shift_type,
-                    is_active: a.is_active,
-                  };
-                  const d = assocDrafts[a.id] ?? base;
-                  return (
-                    <tr key={a.id}>
-                      <td className="px-4 py-2">
-                        <input
-                          type="text"
-                          value={d.login}
-                          onChange={(e) =>
-                            setAssocDrafts((prev) => ({
-                              ...prev,
-                              [a.id]: { ...(prev[a.id] ?? base), login: e.target.value },
-                            }))
-                          }
-                          placeholder="Associate login"
-                          className="w-full max-w-xs rounded border border-slate-200 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
-                        />
-                      </td>
-                      <td className="px-4 py-2">
-                        <select
-                          value={d.shift_type}
-                          onChange={(e) =>
-                            setAssocDrafts((prev) => ({
-                              ...prev,
-                              [a.id]: { ...(prev[a.id] ?? base), shift_type: e.target.value as ShiftType },
-                            }))
-                          }
-                          className="rounded border border-slate-200 px-2 py-1"
-                        >
-                          {SLOT_TYPES.map((s) => (
-                            <option key={s} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-2">
-                        <input
-                          type="checkbox"
-                          checked={d.is_active}
-                          onChange={(e) =>
-                            setAssocDrafts((prev) => ({
-                              ...prev,
-                              [a.id]: { ...(prev[a.id] ?? base), is_active: e.target.checked },
-                            }))
-                          }
-                        />
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <button
-                          type="button"
-                          className="text-rose-600 hover:underline"
-                          disabled={pending}
-                          onClick={() => {
-                            setError(null);
-                            setSuccess(null);
-                            startTransition(async () => {
-                              const res = await deleteAssociate(a.id);
-                              if (!res.ok) setError(res.error);
-                              else router.refresh();
-                            });
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {associates.map((a) => (
+                  <tr key={a.id}>
+                    <td className="px-4 py-2">
+                      <input
+                        id={`login-${a.id}`}
+                        type="text"
+                        defaultValue={loginMap[a.id] ?? ""}
+                        placeholder="Enter login"
+                        className="w-full max-w-xs rounded border border-slate-200 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <select
+                        id={`shift-${a.id}`}
+                        defaultValue={a.shift_type}
+                        className="rounded border border-slate-200 px-2 py-1"
+                      >
+                        {SLOT_TYPES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-2">
+                      <input type="checkbox" defaultChecked={a.is_active} id={`active-${a.id}`} />
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <button
+                        type="button"
+                        className="text-rose-600 hover:underline"
+                        disabled={pending}
+                        onClick={() => {
+                          setError(null);
+                          setSuccess(null);
+                          startTransition(async () => {
+                            const res = await deleteAssociate(a.id);
+                            if (!res.ok) setError(res.error);
+                            else router.refresh();
+                          });
+                        }}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        className="ml-2 text-sky-700 hover:underline"
+                        disabled={pending}
+                        onClick={() => {
+                          const login = (document.getElementById(`login-${a.id}`) as HTMLInputElement).value;
+                          const shift_type = (document.getElementById(`shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
+                          const is_active = (document.getElementById(`active-${a.id}`) as HTMLInputElement).checked;
+                          setError(null);
+                          startTransition(async () => {
+                            const [assocRes, loginRes] = await Promise.all([
+                              updateAssociate({ id: a.id, name: a.name, shift_type, is_active }),
+                              saveAssociateLogin(a.id, login),
+                            ]);
+                            if (!assocRes.ok) setError(assocRes.error);
+                            else if (!loginRes.ok) setError(loginRes.error);
+                            else { setSuccess("Saved."); setTimeout(() => setSuccess(null), 2500); router.refresh(); }
+                          });
+                        }}
+                      >
+                        Save
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/80 bg-slate-50/60 px-4 py-3">
-            <button
-              type="button"
-              disabled={pending || !hasSupabase || associates.length === 0}
-              onClick={() => saveAssocDrafts()}
-              className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
-            >
-              {pending ? "Saving…" : "Save changes"}
-            </button>
           </div>
         </div>
       ) : null}
@@ -692,17 +398,53 @@ export function ShiftManagerPanel({
       {tab === "pooling" ? (
         <div className="space-y-4">
           <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-            <div className="border-b border-slate-200/80 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-900">Pooling rules</h3>
-              <p className="text-xs text-slate-500">
-                Adjust shift type and workdays below, then click <strong>Save pooling rules</strong> at the bottom to sync.
-              </p>
+            <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Pooling rules</h3>
+                <p className="text-xs text-slate-500">Set shift type and available workdays for pooling assignments.</p>
+              </div>
+              <button
+                type="button"
+                disabled={pending}
+                className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+                onClick={() => {
+                  setError(null);
+                  setSuccess(null);
+                  startTransition(async () => {
+                    for (const a of associates) {
+                      const shift_type = (document.getElementById(`pool-shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
+                      const assocRes = await updateAssociate({
+                        id: a.id,
+                        name: a.name,
+                        shift_type,
+                        is_active: a.is_active,
+                      });
+                      if (!assocRes.ok) { setError(assocRes.error); return; }
+                      const ruleRes = await upsertPoolingRule({
+                        associate_id: a.id,
+                        allow_sunday: (document.getElementById(`sun-${a.id}`) as HTMLInputElement).checked,
+                        allow_monday: (document.getElementById(`mon-${a.id}`) as HTMLInputElement).checked,
+                        allow_tuesday: (document.getElementById(`tue-${a.id}`) as HTMLInputElement).checked,
+                        allow_wednesday: (document.getElementById(`wed-${a.id}`) as HTMLInputElement).checked,
+                        allow_thursday: (document.getElementById(`thu-${a.id}`) as HTMLInputElement).checked,
+                        allow_friday: (document.getElementById(`fri-${a.id}`) as HTMLInputElement).checked,
+                        allow_saturday: (document.getElementById(`sat-${a.id}`) as HTMLInputElement).checked,
+                      });
+                      if (!ruleRes.ok) { setError(ruleRes.error); return; }
+                    }
+                    setSuccess("All pooling rules saved.");
+                    router.refresh();
+                  });
+                }}
+              >
+                {pending ? "Saving…" : "Save"}
+              </button>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                   <tr>
-                    <th className="px-4 py-2">Associate Login</th>
+                    <th className="px-4 py-2">Associate</th>
                     <th className="px-4 py-2">Shift type</th>
                     <th className="px-4 py-2">Sunday</th>
                     <th className="px-4 py-2">Monday</th>
@@ -716,91 +458,36 @@ export function ShiftManagerPanel({
                 <tbody className="divide-y divide-slate-200/80">
                   {associates.map((a) => {
                     const r = ruleByAssoc.get(a.id);
-                    const base: PoolRowDraft = {
-                      shift_type: a.shift_type,
-                      allow_sunday: Boolean(r?.allow_sunday),
-                      allow_monday: Boolean(r?.allow_monday),
-                      allow_tuesday: Boolean(r?.allow_tuesday),
-                      allow_wednesday: Boolean(r?.allow_wednesday),
-                      allow_thursday: Boolean(r?.allow_thursday),
-                      allow_friday: Boolean(r?.allow_friday),
-                      allow_saturday: Boolean(r?.allow_saturday),
-                    };
-                    const d = poolDrafts[a.id] ?? base;
-                    const patch = (patch: Partial<PoolRowDraft>) =>
-                      setPoolDrafts((prev) => ({
-                        ...prev,
-                        [a.id]: { ...(prev[a.id] ?? base), ...patch },
-                      }));
                     return (
                       <tr key={a.id}>
-                        <td className="px-4 py-2 font-medium text-slate-800">{associateLoginLabel(loginMap, a.id)}</td>
+                        <td className="px-4 py-2 font-medium text-slate-800">{loginMap[a.id] || a.name}</td>
                         <td className="px-4 py-2">
-                          <select
-                            value={POOLING_SHIFT_TYPES.includes(d.shift_type) ? d.shift_type : "FHD"}
-                            onChange={(e) => patch({ shift_type: e.target.value as ShiftType })}
-                            className="rounded border border-slate-200 px-2 py-1"
-                          >
+                          <select id={`pool-shift-${a.id}`} defaultValue={a.shift_type} className="rounded border border-slate-200 px-2 py-1">
                             {POOLING_SHIFT_TYPES.map((s) => (
                               <option key={s} value={s}>{s}</option>
                             ))}
                           </select>
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_sunday}
-                            onChange={(e) => patch({ allow_sunday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_sunday} id={`sun-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_monday}
-                            onChange={(e) => patch({ allow_monday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_monday} id={`mon-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_tuesday}
-                            onChange={(e) => patch({ allow_tuesday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_tuesday} id={`tue-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_wednesday}
-                            onChange={(e) => patch({ allow_wednesday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_wednesday} id={`wed-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_thursday}
-                            onChange={(e) => patch({ allow_thursday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_thursday} id={`thu-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_friday}
-                            onChange={(e) => patch({ allow_friday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_friday} id={`fri-${a.id}`} />
                         </td>
                         <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            className="h-10 w-10 cursor-pointer accent-sky-600"
-                            checked={d.allow_saturday}
-                            onChange={(e) => patch({ allow_saturday: e.target.checked })}
-                          />
+                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_saturday} id={`sat-${a.id}`} />
                         </td>
                       </tr>
                     );
@@ -808,17 +495,8 @@ export function ShiftManagerPanel({
                 </tbody>
               </table>
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-200/80 bg-slate-50/60 px-4 py-3">
-              <button
-                type="button"
-                disabled={pending || !hasSupabase || associates.length === 0}
-                onClick={() => savePoolDrafts()}
-                className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
-              >
-                {pending ? "Saving…" : "Save pooling rules"}
-              </button>
-            </div>
           </div>
+
         </div>
       ) : null}
 
