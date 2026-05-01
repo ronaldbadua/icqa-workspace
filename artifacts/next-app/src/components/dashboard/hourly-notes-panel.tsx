@@ -2,8 +2,8 @@
 
 import { useMemo, useState, useTransition, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { saveAssociateLogin } from "@/app/actions/associate-table";
 import { upsertHourlyNote, deleteHourlyNote } from "@/app/actions/hourly-notes";
+import { saveAssociateLogin } from "@/app/actions/associate-table";
 import type { HourlyNoteStatus } from "@/lib/supabase/database.types";
 import { HOURLY_NOTES_HOUR_END, HOURLY_NOTES_HOUR_START, STAND_UP_2_HOUR } from "@/lib/constants";
 import { buildHourlySlots, summarizeHourlyStatus, type HourlySlot } from "@/lib/hourly-notes-logic";
@@ -27,8 +27,7 @@ interface HourlyNotesPanelProps {
     manager_comment: string;
   }[];
   hasSupabase: boolean;
-  /** Associate IDs and `associate_p_scores.login` values (no separate name column). */
-  associateLogins: { id: string; login: string }[];
+  associates: { id: string; login: string }[];
 }
 
 type FormState = { content: string; managerComment: string; status: HourlyNoteStatus };
@@ -41,29 +40,26 @@ function slotToForm(slot: HourlySlot): FormState {
   };
 }
 
-/** Stand Up rows (h=6 and STAND_UP_2_HOUR) start expanded; all other hourly blocks start collapsed. */
+/** Only Stand Up rows start expanded; all regular hourly blocks start collapsed. */
 function buildDefaultExpanded(): Set<number> {
   return new Set<number>([6, STAND_UP_2_HOUR]);
 }
 
-type HourlySectionTab = "hourly_slots" | "associate_login";
-
-export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogins }: HourlyNotesPanelProps) {
+export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associates }: HourlyNotesPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
+  const [loginPending, startLoginTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(buildDefaultExpanded);
   const [formByHour, setFormByHour] = useState<Record<number, FormState>>({});
-  const [hourlySaveOk, setHourlySaveOk] = useState(false);
-  const [sectionTab, setSectionTab] = useState<HourlySectionTab>("hourly_slots");
-  const [loginDraftById, setLoginDraftById] = useState<Record<string, string>>({});
-  const [loginSaveError, setLoginSaveError] = useState<string | null>(null);
-  const [loginSaveOk, setLoginSaveOk] = useState(false);
-
-  useEffect(() => {
-    setLoginDraftById(Object.fromEntries(associateLogins.map((r) => [r.id, r.login])));
-  }, [associateLogins]);
+  const [savedHours, setSavedHours] = useState<Set<number>>(new Set());
+  const [activeTab, setActiveTab] = useState<"notes" | "login">("notes");
+  const [loginEdits, setLoginEdits] = useState<Record<string, string>>(
+    () => Object.fromEntries(associates.map((a) => [a.id, a.login]))
+  );
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginSaved, setLoginSaved] = useState(false);
 
   const dateValue = searchParams.get("date") ?? initialDate;
 
@@ -79,8 +75,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
       setError(null);
       setFormByHour({});
       setExpanded(buildDefaultExpanded());
-      setHourlySaveOk(false);
-      setSectionTab("hourly_slots");
+      setSavedHours(new Set());
       router.push(`/hourly-notes?date=${encodeURIComponent(d)}`);
     },
     [router]
@@ -110,43 +105,36 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
   const getForm = (slot: HourlySlot): FormState =>
     formByHour[slot.hour] ?? slotToForm(slot);
 
-  const slotFormDirty = (slot: HourlySlot) => {
-    const f = getForm(slot);
-    const b = slotToForm(slot);
-    return (
-      f.content !== b.content || f.managerComment !== b.managerComment || f.status !== b.status
-    );
+  const flashSaved = (hour: number) => {
+    setSavedHours((prev) => new Set(prev).add(hour));
+    setTimeout(() => {
+      setSavedHours((prev) => {
+        const next = new Set(prev);
+        next.delete(hour);
+        return next;
+      });
+    }, 2500);
   };
 
-  const saveAllHourlyNotes = () => {
+  const saveSlot = (slot: HourlySlot) => {
+    const f = getForm(slot);
     if (!hasSupabase) {
       setError("Configure Supabase to save notes.");
       return;
     }
-    const dirtySlots = slots.filter(slotFormDirty);
-    if (dirtySlots.length === 0) {
-      setHourlySaveOk(true);
-      setTimeout(() => setHourlySaveOk(false), 2000);
-      return;
-    }
     setError(null);
-    setHourlySaveOk(false);
     startTransition(async () => {
-      for (const slot of dirtySlots) {
-        const f = getForm(slot);
-        const res = await upsertHourlyNote(dateValue, slot.hour, {
-          content: f.content,
-          author_name: slot.author_name,
-          status: f.status,
-          manager_comment: f.managerComment,
-        });
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
+      const res = await upsertHourlyNote(dateValue, slot.hour, {
+        content: f.content,
+        author_name: slot.author_name,
+        status: f.status,
+        manager_comment: f.managerComment,
+      });
+      if (!res.ok) {
+        setError(res.error);
+        return;
       }
-      setHourlySaveOk(true);
-      setTimeout(() => setHourlySaveOk(false), 2500);
+      flashSaved(slot.hour);
       router.refresh();
     });
   };
@@ -173,29 +161,18 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
     });
   };
 
-  const saveAssociateLogins = () => {
-    if (!hasSupabase) {
-      setLoginSaveError("Configure Supabase to save.");
-      return;
-    }
-    setLoginSaveError(null);
-    setLoginSaveOk(false);
-    startTransition(async () => {
-      const dirty = associateLogins.filter((r) => (loginDraftById[r.id] ?? "") !== r.login);
-      if (dirty.length === 0) {
-        setLoginSaveOk(true);
-        setTimeout(() => setLoginSaveOk(false), 2000);
-        return;
+  const saveLogins = () => {
+    if (!hasSupabase) { setLoginError("Configure Supabase to save."); return; }
+    setLoginError(null);
+    startLoginTransition(async () => {
+      for (const a of associates) {
+        const newLogin = loginEdits[a.id] ?? "";
+        if (newLogin === a.login) continue;
+        const res = await saveAssociateLogin(a.id, newLogin);
+        if (!res.ok) { setLoginError(res.error ?? "Save failed."); return; }
       }
-      for (const r of dirty) {
-        const res = await saveAssociateLogin(r.id, loginDraftById[r.id] ?? "");
-        if (!res.ok) {
-          setLoginSaveError(res.error);
-          return;
-        }
-      }
-      setLoginSaveOk(true);
-      setTimeout(() => setLoginSaveOk(false), 2500);
+      setLoginSaved(true);
+      setTimeout(() => setLoginSaved(false), 2500);
       router.refresh();
     });
   };
@@ -237,123 +214,50 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
           </div>
         </div>
 
-        <div className="px-5 py-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-            <StatusPill label="No Actions Needed" value={summary.noActionNeeded} tone="info" />
-            <StatusPill label="Resolved" value={summary.resolved} tone="success" />
-            <StatusPill label="Pending" value={summary.pending} tone="warning" />
-            <StatusPill label="Needs Attention" value={summary.needsAttention} tone="danger" />
-            <StatusPill label="Total Logged" value={summary.totalLogged} tone="neutral" />
-          </div>
+        {/* Tab toggle */}
+        <div className="flex border-b border-slate-200/80 px-5">
+          {(["notes", "login"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => { setLoginError(null); setActiveTab(tab); }}
+              className={[
+                "mr-1 border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors",
+                activeTab === tab
+                  ? "border-sky-600 text-sky-700"
+                  : "border-transparent text-slate-500 hover:text-slate-800",
+              ].join(" ")}
+            >
+              {tab === "notes" ? "Hourly Notes" : "Associate Login"}
+            </button>
+          ))}
         </div>
 
-        <div className="flex flex-wrap gap-2 border-t border-slate-200/80 px-5 py-3">
-          <button
-            type="button"
-            onClick={() => {
-              setSectionTab("hourly_slots");
-              setLoginSaveError(null);
-            }}
-            className={[
-              "rounded-lg px-3 py-2 text-sm font-semibold transition",
-              sectionTab === "hourly_slots" ? "bg-sky-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-            ].join(" ")}
-          >
-            Hourly slots
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setSectionTab("associate_login");
-              setLoginSaveError(null);
-            }}
-            className={[
-              "rounded-lg px-3 py-2 text-sm font-semibold transition",
-              sectionTab === "associate_login" ? "bg-sky-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-            ].join(" ")}
-          >
-            Associate Login
-          </button>
-        </div>
-
-        {sectionTab === "associate_login" ? (
-          <div className="border-t border-slate-200/80 px-5 py-4">
-            {loginSaveError ? (
-              <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
-                {loginSaveError}
-              </p>
-            ) : null}
-            {loginSaveOk ? (
-              <p className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status">
-                Saved to Supabase.
-              </p>
-            ) : null}
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm text-slate-600">Edit associate login values. Changes update on screen immediately; use Save to write to Supabase.</p>
-              <button
-                type="button"
-                disabled={pending || !hasSupabase}
-                onClick={saveAssociateLogins}
-                className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
-              >
-                {pending ? "Saving…" : "Save"}
-              </button>
+        {activeTab === "notes" ? (
+          <>
+            <div className="px-5 py-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                <StatusPill label="No Actions Needed" value={summary.noActionNeeded} tone="info" />
+                <StatusPill label="Resolved" value={summary.resolved} tone="success" />
+                <StatusPill label="Pending" value={summary.pending} tone="warning" />
+                <StatusPill label="Needs Attention" value={summary.needsAttention} tone="danger" />
+                <StatusPill label="Total Logged" value={summary.totalLogged} tone="neutral" />
+              </div>
             </div>
-            <div className="overflow-x-auto rounded-lg border border-slate-200/80">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Associate Login</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {associateLogins.length === 0 ? (
-                    <tr>
-                      <td className="px-4 py-6 text-center text-slate-400">No associates found. Add associates on the Scheduling page first.</td>
-                    </tr>
-                  ) : (
-                    associateLogins.map((r) => (
-                      <tr key={r.id} className="hover:bg-slate-50/50">
-                        <td className="px-4 py-2">
-                          <input
-                            type="text"
-                            value={loginDraftById[r.id] ?? ""}
-                            onChange={(e) =>
-                              setLoginDraftById((prev) => ({ ...prev, [r.id]: e.target.value }))
-                            }
-                            className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/30"
-                            placeholder="Associate login"
-                            autoComplete="off"
-                          />
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : null}
-
-        {sectionTab === "hourly_slots" ? (
-        <>
-        {hourlySaveOk ? (
-          <p className="border-t border-slate-200/80 bg-emerald-50 px-5 py-2 text-sm font-medium text-emerald-900" role="status">
-            Hourly notes saved to Supabase.
-          </p>
-        ) : null}
-        <ul className="divide-y divide-slate-200/80 border-t border-slate-200/80">
+            <ul className="divide-y divide-slate-200/80 border-t border-slate-200/80">
           {slots.map((slot) => {
+            const isStandUp = slot.hour === 6 || slot.hour === STAND_UP_2_HOUR;
             const isOpen = expanded.has(slot.hour);
-            const f = getForm(slot);
+            const isSaved = savedHours.has(slot.hour);
             const rowTone =
-              f.status === "resolved"
+              slot.status === "resolved"
                 ? "bg-emerald-50/50"
-                : f.status === "needs_attention"
+                : slot.status === "needs_attention"
                   ? "bg-rose-50/50"
-                  : f.status === "no_action_needed"
+                  : slot.status === "no_action_needed"
                     ? "bg-sky-50/50"
                     : "bg-amber-50/60";
+            const f = getForm(slot);
             return (
               <li key={slot.hour} className={rowTone}>
                 <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-5 py-3">
@@ -367,7 +271,12 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
                         {formatHourLabel(slot.hour)}
                       </span>
                     )}
-                    <HourlyRowStatusBadge status={f.status} />
+                    <HourlyRowStatusBadge status={slot.status} />
+                    {isSaved ? (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                        Saved ✓
+                      </span>
+                    ) : null}
                   </div>
                   {/* Expand / Collapse toggle */}
                   <button
@@ -485,28 +394,97 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
                           Clear saved note
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        className={[
+                          "rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60",
+                          isSaved ? "bg-emerald-600 hover:bg-emerald-700" : "bg-sky-600 hover:bg-sky-700",
+                        ].join(" ")}
+                        onClick={() => saveSlot(slot)}
+                        disabled={pending}
+                      >
+                        {pending ? "Saving…" : isSaved ? "Saved ✓" : "Save"}
+                      </button>
                     </div>
                   </div>
                 </div>
               </li>
             );
           })}
-        </ul>
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 bg-slate-50/60 px-5 py-4">
-          <p className="text-xs text-slate-600">
-            Edits apply instantly on screen. Use <strong>Save hourly notes</strong> to write all changed hours to Supabase in one step.
-          </p>
-          <button
-            type="button"
-            disabled={pending || !hasSupabase}
-            onClick={() => saveAllHourlyNotes()}
-            className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
-          >
-            {pending ? "Saving…" : "Save hourly notes"}
-          </button>
-        </div>
-        </>
-        ) : null}
+            </ul>
+          </>
+        ) : (
+          /* ── Associate Login tab ─────────────────────────────────────── */
+          <div>
+            {/* Toolbar */}
+            <div className="flex items-center justify-between border-b border-slate-200/80 px-5 py-3">
+              <p className="text-xs text-slate-500">Edit login credentials — click Save to sync to Supabase.</p>
+              <div className="flex items-center gap-3">
+                {loginSaved && (
+                  <span className="flex items-center gap-1 text-xs font-medium text-emerald-700">
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Saved to Supabase
+                  </span>
+                )}
+                {loginError && <span className="text-xs font-medium text-rose-700">{loginError}</span>}
+                <button
+                  type="button"
+                  onClick={saveLogins}
+                  disabled={loginPending || !hasSupabase}
+                  className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 active:scale-95 disabled:opacity-50 transition-all"
+                >
+                  {loginPending ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-5 py-3 w-10">#</th>
+                    <th className="px-5 py-3">Associate Login</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {associates.length === 0 ? (
+                    <tr>
+                      <td colSpan={2} className="px-5 py-8 text-center text-slate-400">
+                        No associates found. Add associates in the Scheduling page first.
+                      </td>
+                    </tr>
+                  ) : (
+                    associates.map((a, i) => (
+                      <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="px-5 py-2 text-xs text-slate-400">{i + 1}</td>
+                        <td className="px-5 py-2">
+                          <input
+                            type="text"
+                            value={loginEdits[a.id] ?? ""}
+                            onChange={(e) =>
+                              setLoginEdits((prev) => ({ ...prev, [a.id]: e.target.value }))
+                            }
+                            placeholder="—"
+                            className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-700 transition focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/40"
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {associates.length > 0 && (
+              <div className="border-t border-slate-100 bg-slate-50 px-5 py-2 text-xs text-slate-400">
+                {associates.length} associate{associates.length !== 1 ? "s" : ""} · Edits are reactive · Click Save to persist
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
