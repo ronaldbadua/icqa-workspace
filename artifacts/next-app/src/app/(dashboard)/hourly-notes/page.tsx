@@ -3,13 +3,8 @@ import { PageHero } from "@/components/dashboard/page-hero";
 import { HourlyNotesPanel } from "@/components/dashboard/hourly-notes-panel";
 import { ChatThreadPanel } from "@/components/dashboard/chat-thread-panel";
 import { toDateStringLocal } from "@/lib/hourly-notes-logic";
-import {
-  getAssociateLoginsForWorkspace,
-  getHourlyNotesForDate,
-  getChatMessages,
-  isSupabaseConfigured,
-} from "@/lib/data/queries";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getHourlyNotesForDate, getChatMessages, isSupabaseConfigured } from "@/lib/data/queries";
+import { createAdminSupabaseClient, createServerSupabaseClient } from "@/lib/supabase/server";
 
 function defaultDate() {
   return toDateStringLocal(new Date());
@@ -68,11 +63,10 @@ export default async function HourlyNotesPage({
 
   const hasConfig = isSupabaseConfigured();
 
-  // Load hourly notes + chat messages + associate logins + user session in parallel
-  const [{ rows, error }, { messages }, associateLogins, supabase] = await Promise.all([
+  // Load hourly notes + chat messages + user session + associates in parallel
+  const [{ rows, error }, { messages }, supabase] = await Promise.all([
     getHourlyNotesForDate(date),
     getChatMessages(),
-    getAssociateLoginsForWorkspace(),
     createServerSupabaseClient(),
   ]);
 
@@ -82,6 +76,32 @@ export default async function HourlyNotesPage({
 
   const dbError = error && error !== "missing_config" ? error : null;
   const hasSupabase = hasConfig && !dbError;
+
+  // Fetch associate logins for the Associate Login tab
+  let associates: { id: string; login: string }[] = [];
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = (createAdminSupabaseClient() ?? supabase) as any;
+    if (db) {
+      const [assocRes, scoresRes] = await Promise.all([
+        db.from("associates").select("id").eq("is_active", true).order("name").limit(30),
+        db.from("associate_p_scores").select("associate_id, login"),
+      ]);
+      if (!assocRes.error && !scoresRes.error) {
+        const loginMap = new Map<string, string>(
+          ((scoresRes.data ?? []) as { associate_id: string; login: string }[]).map(
+            (s) => [s.associate_id, s.login ?? ""]
+          )
+        );
+        associates = ((assocRes.data ?? []) as { id: string }[]).map((a) => ({
+          id: a.id,
+          login: loginMap.get(a.id) ?? "",
+        }));
+      }
+    }
+  } catch {
+    associates = [];
+  }
 
   return (
     <>
@@ -102,7 +122,7 @@ export default async function HourlyNotesPage({
               initialDate={date}
               rows={rows}
               hasSupabase={hasSupabase}
-              associateLogins={associateLogins}
+              associates={associates}
             />
           </Suspense>
         </div>
