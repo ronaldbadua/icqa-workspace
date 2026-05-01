@@ -55,7 +55,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(buildDefaultExpanded);
   const [formByHour, setFormByHour] = useState<Record<number, FormState>>({});
-  const [savedHours, setSavedHours] = useState<Set<number>>(new Set());
+  const [hourlySaveOk, setHourlySaveOk] = useState(false);
   const [sectionTab, setSectionTab] = useState<HourlySectionTab>("hourly_slots");
   const [loginDraftById, setLoginDraftById] = useState<Record<string, string>>({});
   const [loginSaveError, setLoginSaveError] = useState<string | null>(null);
@@ -79,7 +79,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
       setError(null);
       setFormByHour({});
       setExpanded(buildDefaultExpanded());
-      setSavedHours(new Set());
+      setHourlySaveOk(false);
       setSectionTab("hourly_slots");
       router.push(`/hourly-notes?date=${encodeURIComponent(d)}`);
     },
@@ -110,36 +110,43 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
   const getForm = (slot: HourlySlot): FormState =>
     formByHour[slot.hour] ?? slotToForm(slot);
 
-  const flashSaved = (hour: number) => {
-    setSavedHours((prev) => new Set(prev).add(hour));
-    setTimeout(() => {
-      setSavedHours((prev) => {
-        const next = new Set(prev);
-        next.delete(hour);
-        return next;
-      });
-    }, 2500);
+  const slotFormDirty = (slot: HourlySlot) => {
+    const f = getForm(slot);
+    const b = slotToForm(slot);
+    return (
+      f.content !== b.content || f.managerComment !== b.managerComment || f.status !== b.status
+    );
   };
 
-  const saveSlot = (slot: HourlySlot) => {
-    const f = getForm(slot);
+  const saveAllHourlyNotes = () => {
     if (!hasSupabase) {
       setError("Configure Supabase to save notes.");
       return;
     }
+    const dirtySlots = slots.filter(slotFormDirty);
+    if (dirtySlots.length === 0) {
+      setHourlySaveOk(true);
+      setTimeout(() => setHourlySaveOk(false), 2000);
+      return;
+    }
     setError(null);
+    setHourlySaveOk(false);
     startTransition(async () => {
-      const res = await upsertHourlyNote(dateValue, slot.hour, {
-        content: f.content,
-        author_name: slot.author_name,
-        status: f.status,
-        manager_comment: f.managerComment,
-      });
-      if (!res.ok) {
-        setError(res.error);
-        return;
+      for (const slot of dirtySlots) {
+        const f = getForm(slot);
+        const res = await upsertHourlyNote(dateValue, slot.hour, {
+          content: f.content,
+          author_name: slot.author_name,
+          status: f.status,
+          manager_comment: f.managerComment,
+        });
+        if (!res.ok) {
+          setError(res.error);
+          return;
+        }
       }
-      flashSaved(slot.hour);
+      setHourlySaveOk(true);
+      setTimeout(() => setHourlySaveOk(false), 2500);
       router.refresh();
     });
   };
@@ -329,20 +336,24 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
         ) : null}
 
         {sectionTab === "hourly_slots" ? (
+        <>
+        {hourlySaveOk ? (
+          <p className="border-t border-slate-200/80 bg-emerald-50 px-5 py-2 text-sm font-medium text-emerald-900" role="status">
+            Hourly notes saved to Supabase.
+          </p>
+        ) : null}
         <ul className="divide-y divide-slate-200/80 border-t border-slate-200/80">
           {slots.map((slot) => {
-            const isStandUp = slot.hour === 6 || slot.hour === STAND_UP_2_HOUR;
             const isOpen = expanded.has(slot.hour);
-            const isSaved = savedHours.has(slot.hour);
+            const f = getForm(slot);
             const rowTone =
-              slot.status === "resolved"
+              f.status === "resolved"
                 ? "bg-emerald-50/50"
-                : slot.status === "needs_attention"
+                : f.status === "needs_attention"
                   ? "bg-rose-50/50"
-                  : slot.status === "no_action_needed"
+                  : f.status === "no_action_needed"
                     ? "bg-sky-50/50"
                     : "bg-amber-50/60";
-            const f = getForm(slot);
             return (
               <li key={slot.hour} className={rowTone}>
                 <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-5 py-3">
@@ -356,12 +367,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
                         {formatHourLabel(slot.hour)}
                       </span>
                     )}
-                    <HourlyRowStatusBadge status={slot.status} />
-                    {isSaved ? (
-                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                        Saved ✓
-                      </span>
-                    ) : null}
+                    <HourlyRowStatusBadge status={f.status} />
                   </div>
                   {/* Expand / Collapse toggle */}
                   <button
@@ -479,17 +485,6 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
                           Clear saved note
                         </button>
                       ) : null}
-                      <button
-                        type="button"
-                        className={[
-                          "rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:opacity-60",
-                          isSaved ? "bg-emerald-600 hover:bg-emerald-700" : "bg-sky-600 hover:bg-sky-700",
-                        ].join(" ")}
-                        onClick={() => saveSlot(slot)}
-                        disabled={pending}
-                      >
-                        {pending ? "Saving…" : isSaved ? "Saved ✓" : "Save"}
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -497,6 +492,20 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogi
             );
           })}
         </ul>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 bg-slate-50/60 px-5 py-4">
+          <p className="text-xs text-slate-600">
+            Edits apply instantly on screen. Use <strong>Save hourly notes</strong> to write all changed hours to Supabase in one step.
+          </p>
+          <button
+            type="button"
+            disabled={pending || !hasSupabase}
+            onClick={() => saveAllHourlyNotes()}
+            className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
+          >
+            {pending ? "Saving…" : "Save hourly notes"}
+          </button>
+        </div>
+        </>
         ) : null}
       </div>
     </div>

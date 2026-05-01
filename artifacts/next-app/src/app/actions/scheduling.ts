@@ -30,6 +30,9 @@ export async function addAssociate(name: string, shiftType: ShiftType): Promise<
   await supabase.from("pooling_rules").insert({ associate_id: data.id });
 
   revalidatePath("/scheduling");
+  revalidatePath("/hourly-notes");
+  revalidatePath("/associate-table");
+  revalidatePath("/process-path");
   return { ok: true };
 }
 
@@ -48,6 +51,9 @@ export async function updateAssociate(data: {
     .eq("id", data.id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
+  revalidatePath("/hourly-notes");
+  revalidatePath("/associate-table");
+  revalidatePath("/process-path");
   return { ok: true };
 }
 
@@ -57,6 +63,9 @@ export async function deleteAssociate(id: string): Promise<ActionResult> {
   const { error } = await supabase.from("associates").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
+  revalidatePath("/hourly-notes");
+  revalidatePath("/associate-table");
+  revalidatePath("/process-path");
   return { ok: true };
 }
 
@@ -75,6 +84,9 @@ export async function upsertPoolingRule(data: {
   const { error } = await supabase.from("pooling_rules").upsert(data, { onConflict: "associate_id" });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
+  revalidatePath("/hourly-notes");
+  revalidatePath("/associate-table");
+  revalidatePath("/process-path");
   return { ok: true };
 }
 
@@ -94,6 +106,9 @@ export async function upsertPoolingRules(rules: Array<{
   const { error } = await supabase.from("pooling_rules").upsert(rules, { onConflict: "associate_id" });
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
+  revalidatePath("/hourly-notes");
+  revalidatePath("/associate-table");
+  revalidatePath("/process-path");
   return { ok: true };
 }
 
@@ -152,6 +167,9 @@ export async function upsertAssignment(data: {
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/scheduling");
+  revalidatePath("/hourly-notes");
+  revalidatePath("/associate-table");
+  revalidatePath("/process-path");
   return { ok: true };
 }
 
