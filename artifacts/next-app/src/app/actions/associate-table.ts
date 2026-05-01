@@ -44,30 +44,6 @@ export async function saveAssociatePScores(
   return { ok: true };
 }
 
-export async function updateAssociateNames(
-  updates: { id: string; name: string }[]
-): Promise<ActionResult> {
-  if (!updates.length) return { ok: true };
-  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
-  if (!supabase) return { ok: false, error: "Supabase is not configured." };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = supabase as any;
-  for (const u of updates) {
-    const trimmed = u.name.trim();
-    if (!trimmed) continue;
-    const { error } = await db
-      .from("associates")
-      .update({ name: trimmed })
-      .eq("id", u.id);
-    if (error) return { ok: false, error: error.message };
-  }
-  revalidatePath("/process-path");
-  revalidatePath("/scheduling");
-  revalidatePath("/associate-table");
-  return { ok: true };
-}
-
 export async function saveAssociateLogin(
   associate_id: string,
   login: string

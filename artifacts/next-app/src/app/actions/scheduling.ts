@@ -14,10 +14,10 @@ import { monthBounds } from "@/lib/week";
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
-export async function addAssociate(name: string, shiftType: ShiftType): Promise<ActionResult> {
+export async function addAssociate(login: string, shiftType: ShiftType): Promise<ActionResult> {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
-  const clean = name.trim();
+  const clean = login.trim();
   if (!clean) return { ok: false, error: "Associate login is required." };
   const { data, error } = await supabase
     .from("associates")
@@ -38,16 +38,17 @@ export async function addAssociate(name: string, shiftType: ShiftType): Promise<
 
 export async function updateAssociate(data: {
   id: string;
-  name: string;
+  /** Associate login (persisted in DB `associates.name` until a dedicated column exists). */
+  login: string;
   shift_type: ShiftType;
   is_active: boolean;
 }): Promise<ActionResult> {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
-  if (!data.name.trim()) return { ok: false, error: "Associate login is required." };
+  if (!data.login.trim()) return { ok: false, error: "Associate login is required." };
   const { error } = await supabase
     .from("associates")
-    .update({ name: data.name.trim(), shift_type: data.shift_type, is_active: data.is_active })
+    .update({ name: data.login.trim(), shift_type: data.shift_type, is_active: data.is_active })
     .eq("id", data.id);
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
@@ -201,7 +202,7 @@ export async function autoAssignMonthly(
 
   const [{ data: associates, error: assocErr }, { data: rules, error: ruleErr }] =
     await Promise.all([
-      supabase.from("associates").select("id, name, shift_type, is_active").eq("is_active", true),
+      supabase.from("associates").select("id, shift_type, is_active").eq("is_active", true),
       supabase
         .from("pooling_rules")
         .select(

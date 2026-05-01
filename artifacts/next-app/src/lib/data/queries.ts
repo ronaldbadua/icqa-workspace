@@ -7,7 +7,6 @@ export type { DatabaseEntryRow };
 
 export type AssociateRow = {
   id: string;
-  name: string;
   shift_type: ShiftType;
   is_active: boolean;
   created_at: string;
@@ -255,7 +254,7 @@ export async function getSchedulingData(ym: string) {
 
   const { start, end } = monthBounds(ym);
   const [associatesRes, rulesRes, assignmentsRes] = await Promise.all([
-    supabase.from("associates").select("id, name, shift_type, is_active, created_at, updated_at").order("name", { ascending: true }),
+    supabase.from("associates").select("id, shift_type, is_active, created_at, updated_at").order("created_at", { ascending: true }),
     supabase.from("pooling_rules").select("id, associate_id, allow_sunday, allow_monday, allow_tuesday, allow_wednesday, allow_thursday, allow_friday, allow_saturday, created_at, updated_at"),
     supabase
       .from("monthly_assignments")

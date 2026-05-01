@@ -27,7 +27,7 @@ import { FormLabel } from "@/components/dashboard/status-pill";
 type TabId = "shift" | "associates" | "pooling";
 const POOLING_SHIFT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time"];
 
-/** Shown in scheduling UI; legacy `associates.name` is not displayed. */
+/** Label from `associate_p_scores.login` (DB `associates.name` mirrors login for compatibility). */
 function associateLoginLabel(loginMap: Record<string, string>, associateId: string) {
   const v = (loginMap[associateId] ?? "").trim();
   return v.length > 0 ? v : "—";
@@ -260,15 +260,15 @@ export function ShiftManagerPanel({
         if (!d) continue;
         const serverLogin = loginMap[a.id] ?? "";
         if (d.login === serverLogin && d.shift_type === a.shift_type && d.is_active === a.is_active) continue;
-        const nameForDb = d.login.trim() || a.name;
-        if (!nameForDb.trim()) {
+        const loginForDb = d.login.trim() || (loginMap[a.id] ?? "").trim();
+        if (!loginForDb) {
           setError("Associate login is required for every row before saving.");
           return;
         }
         const [assocRes, loginRes] = await Promise.all([
           updateAssociate({
             id: a.id,
-            name: nameForDb.trim(),
+            login: loginForDb,
             shift_type: d.shift_type,
             is_active: d.is_active,
           }),
@@ -316,11 +316,10 @@ export function ShiftManagerPanel({
       for (const a of associates) {
         const d = poolDrafts[a.id];
         if (!d) continue;
-        const loginTrim = (loginMap[a.id] ?? "").trim();
-        const nameForDb = loginTrim || a.name;
+        const loginTrim = (loginMap[a.id] ?? "").trim() || "Associate";
         const assocRes = await updateAssociate({
           id: a.id,
-          name: nameForDb,
+          login: loginTrim,
           shift_type: d.shift_type,
           is_active: a.is_active,
         });

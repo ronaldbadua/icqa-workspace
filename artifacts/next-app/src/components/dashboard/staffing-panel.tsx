@@ -25,7 +25,7 @@ const SETUP_SQL = `-- Run in Supabase SQL Editor
 CREATE TABLE IF NOT EXISTS public.staffing_records (
   id uuid NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   staffing_date date NOT NULL,
-  associate_name text NOT NULL DEFAULT '',
+  associate_name text NOT NULL DEFAULT '', -- stores associate login (column name unchanged)
   shift_type text NOT NULL DEFAULT 'Day',
   role text NOT NULL DEFAULT 'Counter',
   status text NOT NULL DEFAULT 'Active',
@@ -55,7 +55,7 @@ NOTIFY pgrst, 'reload schema';`;
 
 const BLANK_INPUT = (): StaffingInput => ({
   staffing_date: "",
-  associate_name: "",
+  associate_login: "",
   shift_type: "Day",
   role: "Counter",
   status: "Active",
@@ -148,7 +148,7 @@ export function StaffingPanel({
   const startEdit = (r: StaffingRecord) => {
     setEditingId(r.id);
     setEditInput({
-      associate_name: r.associate_name,
+      associate_login: r.associate_login,
       shift_type: r.shift_type,
       role: r.role,
       status: r.status,
@@ -238,8 +238,8 @@ export function StaffingPanel({
               <input
                 type="text"
                 placeholder="Associate login"
-                value={newInput.associate_name}
-                onChange={(e) => setNewInput((p) => ({ ...p, associate_name: e.target.value }))}
+                value={newInput.associate_login}
+                onChange={(e) => setNewInput((p) => ({ ...p, associate_login: e.target.value }))}
                 className="w-full rounded-lg border-2 border-slate-300 bg-white px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
               />
             </div>
@@ -285,7 +285,7 @@ export function StaffingPanel({
             </div>
           </div>
           <div className="mt-4 flex gap-2">
-            <button type="button" onClick={handleAdd} disabled={pending || !newInput.associate_name.trim()}
+            <button type="button" onClick={handleAdd} disabled={pending || !newInput.associate_login.trim()}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50 transition-colors">
               {pending ? "Saving…" : "Save"}
             </button>
@@ -335,8 +335,8 @@ export function StaffingPanel({
                         <td className="px-4 py-2">
                           <input
                             type="text"
-                            value={editInput.associate_name ?? ""}
-                            onChange={(e) => setEditInput((p) => ({ ...p, associate_name: e.target.value }))}
+                            value={editInput.associate_login ?? ""}
+                            onChange={(e) => setEditInput((p) => ({ ...p, associate_login: e.target.value }))}
                             className="w-full rounded border border-slate-300 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
                           />
                         </td>
@@ -379,7 +379,7 @@ export function StaffingPanel({
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-3 font-medium text-slate-900">{r.associate_name}</td>
+                        <td className="px-4 py-3 font-medium text-slate-900">{r.associate_login}</td>
                         <td className="px-4 py-3 text-slate-600">{r.shift_type}</td>
                         <td className="px-4 py-3 text-slate-600">{r.role}</td>
                         <td className="px-4 py-3"><StatusBadge status={r.status} /></td>
