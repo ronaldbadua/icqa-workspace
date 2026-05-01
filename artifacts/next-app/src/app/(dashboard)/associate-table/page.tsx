@@ -13,12 +13,7 @@ async function getData() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = supabase as any;
   const [associatesRes, scoresRes] = await Promise.all([
-    db
-      .from("associates")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name", { ascending: true })
-      .limit(15),
+    db.from("associates").select("id").eq("is_active", true).order("created_at", { ascending: true }).limit(15),
     db
       .from("associate_p_scores")
       .select("associate_id, p1, p2, p3, login"),
@@ -27,7 +22,7 @@ async function getData() {
   const error = associatesRes.error?.message ?? scoresRes.error?.message ?? null;
 
   return {
-    associates: (associatesRes.data ?? []) as { id: string; name: string }[],
+    associates: (associatesRes.data ?? []) as { id: string }[],
     scores: (scoresRes.data ?? []) as AssociatePScore[],
     error,
   };

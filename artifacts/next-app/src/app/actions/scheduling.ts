@@ -18,7 +18,7 @@ export async function addAssociate(name: string, shiftType: ShiftType): Promise<
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
   const clean = name.trim();
-  if (!clean) return { ok: false, error: "Associate name is required." };
+  if (!clean) return { ok: false, error: "Associate login is required." };
   const { data, error } = await supabase
     .from("associates")
     .insert({ name: clean, shift_type: shiftType, is_active: true })
@@ -41,7 +41,7 @@ export async function updateAssociate(data: {
 }): Promise<ActionResult> {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
-  if (!data.name.trim()) return { ok: false, error: "Associate name is required." };
+  if (!data.name.trim()) return { ok: false, error: "Associate login is required." };
   const { error } = await supabase
     .from("associates")
     .update({ name: data.name.trim(), shift_type: data.shift_type, is_active: data.is_active })

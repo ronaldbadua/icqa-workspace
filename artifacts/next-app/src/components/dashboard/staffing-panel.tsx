@@ -234,10 +234,10 @@ export function StaffingPanel({
           <h3 className="mb-4 text-sm font-bold uppercase tracking-widest text-sky-900">New Staffing Record</h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3">
             <div>
-              <label className="mb-1 block text-xs font-semibold text-slate-700">Associate Name *</label>
+              <label className="mb-1 block text-xs font-semibold text-slate-700">Associate Login *</label>
               <input
                 type="text"
-                placeholder="Full name"
+                placeholder="Associate login"
                 value={newInput.associate_name}
                 onChange={(e) => setNewInput((p) => ({ ...p, associate_name: e.target.value }))}
                 className="w-full rounded-lg border-2 border-slate-300 bg-white px-3 py-2 text-sm focus:border-sky-400 focus:outline-none"
@@ -319,7 +319,7 @@ export function StaffingPanel({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/80">
-                  <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Associate Login</th>
                   <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Shift</th>
                   <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">Status</th>

@@ -3,7 +3,12 @@ import { PageHero } from "@/components/dashboard/page-hero";
 import { HourlyNotesPanel } from "@/components/dashboard/hourly-notes-panel";
 import { ChatThreadPanel } from "@/components/dashboard/chat-thread-panel";
 import { toDateStringLocal } from "@/lib/hourly-notes-logic";
-import { getHourlyNotesForDate, getChatMessages, isSupabaseConfigured } from "@/lib/data/queries";
+import {
+  getAssociateLoginsForWorkspace,
+  getHourlyNotesForDate,
+  getChatMessages,
+  isSupabaseConfigured,
+} from "@/lib/data/queries";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 function defaultDate() {
@@ -63,10 +68,11 @@ export default async function HourlyNotesPage({
 
   const hasConfig = isSupabaseConfigured();
 
-  // Load hourly notes + chat messages + user session in parallel
-  const [{ rows, error }, { messages }, supabase] = await Promise.all([
+  // Load hourly notes + chat messages + associate logins + user session in parallel
+  const [{ rows, error }, { messages }, associateLogins, supabase] = await Promise.all([
     getHourlyNotesForDate(date),
     getChatMessages(),
+    getAssociateLoginsForWorkspace(),
     createServerSupabaseClient(),
   ]);
 
@@ -96,6 +102,7 @@ export default async function HourlyNotesPage({
               initialDate={date}
               rows={rows}
               hasSupabase={hasSupabase}
+              associateLogins={associateLogins}
             />
           </Suspense>
         </div>

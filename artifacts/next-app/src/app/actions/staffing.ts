@@ -50,7 +50,7 @@ export async function getStaffingRecords(
 export async function createStaffingRecord(
   input: StaffingInput
 ): Promise<ActionResult> {
-  if (!input.associate_name.trim()) return { ok: false, error: "Associate name is required." };
+  if (!input.associate_name.trim()) return { ok: false, error: "Associate login is required." };
   const supabase = await getSupabase();
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 

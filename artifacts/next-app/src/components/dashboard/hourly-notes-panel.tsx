@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { saveAssociateLogin } from "@/app/actions/associate-table";
 import { upsertHourlyNote, deleteHourlyNote } from "@/app/actions/hourly-notes";
 import type { HourlyNoteStatus } from "@/lib/supabase/database.types";
 import { HOURLY_NOTES_HOUR_END, HOURLY_NOTES_HOUR_START, STAND_UP_2_HOUR } from "@/lib/constants";
@@ -26,6 +27,8 @@ interface HourlyNotesPanelProps {
     manager_comment: string;
   }[];
   hasSupabase: boolean;
+  /** Associate IDs and `associate_p_scores.login` values (no separate name column). */
+  associateLogins: { id: string; login: string }[];
 }
 
 type FormState = { content: string; managerComment: string; status: HourlyNoteStatus };
@@ -38,14 +41,14 @@ function slotToForm(slot: HourlySlot): FormState {
   };
 }
 
-/** All regular hours start expanded; Stand Up rows (h=6 and STAND_UP_2_HOUR) start collapsed. */
+/** Stand Up rows (h=6 and STAND_UP_2_HOUR) start expanded; all other hourly blocks start collapsed. */
 function buildDefaultExpanded(): Set<number> {
-  const s = new Set<number>();
-  for (let h = 7; h <= HOURLY_NOTES_HOUR_END; h++) s.add(h);
-  return s;
+  return new Set<number>([6, STAND_UP_2_HOUR]);
 }
 
-export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotesPanelProps) {
+type HourlySectionTab = "hourly_slots" | "associate_login";
+
+export function HourlyNotesPanel({ initialDate, rows, hasSupabase, associateLogins }: HourlyNotesPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -53,6 +56,14 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
   const [expanded, setExpanded] = useState<Set<number>>(buildDefaultExpanded);
   const [formByHour, setFormByHour] = useState<Record<number, FormState>>({});
   const [savedHours, setSavedHours] = useState<Set<number>>(new Set());
+  const [sectionTab, setSectionTab] = useState<HourlySectionTab>("hourly_slots");
+  const [loginDraftById, setLoginDraftById] = useState<Record<string, string>>({});
+  const [loginSaveError, setLoginSaveError] = useState<string | null>(null);
+  const [loginSaveOk, setLoginSaveOk] = useState(false);
+
+  useEffect(() => {
+    setLoginDraftById(Object.fromEntries(associateLogins.map((r) => [r.id, r.login])));
+  }, [associateLogins]);
 
   const dateValue = searchParams.get("date") ?? initialDate;
 
@@ -69,6 +80,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
       setFormByHour({});
       setExpanded(buildDefaultExpanded());
       setSavedHours(new Set());
+      setSectionTab("hourly_slots");
       router.push(`/hourly-notes?date=${encodeURIComponent(d)}`);
     },
     [router]
@@ -154,6 +166,33 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
     });
   };
 
+  const saveAssociateLogins = () => {
+    if (!hasSupabase) {
+      setLoginSaveError("Configure Supabase to save.");
+      return;
+    }
+    setLoginSaveError(null);
+    setLoginSaveOk(false);
+    startTransition(async () => {
+      const dirty = associateLogins.filter((r) => (loginDraftById[r.id] ?? "") !== r.login);
+      if (dirty.length === 0) {
+        setLoginSaveOk(true);
+        setTimeout(() => setLoginSaveOk(false), 2000);
+        return;
+      }
+      for (const r of dirty) {
+        const res = await saveAssociateLogin(r.id, loginDraftById[r.id] ?? "");
+        if (!res.ok) {
+          setLoginSaveError(res.error);
+          return;
+        }
+      }
+      setLoginSaveOk(true);
+      setTimeout(() => setLoginSaveOk(false), 2500);
+      router.refresh();
+    });
+  };
+
   return (
     <div>
       {!hasSupabase ? <ConfigBanner /> : null}
@@ -201,6 +240,95 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
           </div>
         </div>
 
+        <div className="flex flex-wrap gap-2 border-t border-slate-200/80 px-5 py-3">
+          <button
+            type="button"
+            onClick={() => {
+              setSectionTab("hourly_slots");
+              setLoginSaveError(null);
+            }}
+            className={[
+              "rounded-lg px-3 py-2 text-sm font-semibold transition",
+              sectionTab === "hourly_slots" ? "bg-sky-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+            ].join(" ")}
+          >
+            Hourly slots
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSectionTab("associate_login");
+              setLoginSaveError(null);
+            }}
+            className={[
+              "rounded-lg px-3 py-2 text-sm font-semibold transition",
+              sectionTab === "associate_login" ? "bg-sky-600 text-white shadow-sm" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+            ].join(" ")}
+          >
+            Associate Login
+          </button>
+        </div>
+
+        {sectionTab === "associate_login" ? (
+          <div className="border-t border-slate-200/80 px-5 py-4">
+            {loginSaveError ? (
+              <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
+                {loginSaveError}
+              </p>
+            ) : null}
+            {loginSaveOk ? (
+              <p className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900" role="status">
+                Saved to Supabase.
+              </p>
+            ) : null}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-600">Edit associate login values. Changes update on screen immediately; use Save to write to Supabase.</p>
+              <button
+                type="button"
+                disabled={pending || !hasSupabase}
+                onClick={saveAssociateLogins}
+                className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-700 disabled:opacity-60"
+              >
+                {pending ? "Saving…" : "Save"}
+              </button>
+            </div>
+            <div className="overflow-x-auto rounded-lg border border-slate-200/80">
+              <table className="min-w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Associate Login</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {associateLogins.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-slate-400">No associates found. Add associates on the Scheduling page first.</td>
+                    </tr>
+                  ) : (
+                    associateLogins.map((r) => (
+                      <tr key={r.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-2">
+                          <input
+                            type="text"
+                            value={loginDraftById[r.id] ?? ""}
+                            onChange={(e) =>
+                              setLoginDraftById((prev) => ({ ...prev, [r.id]: e.target.value }))
+                            }
+                            className="w-full max-w-md rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-sky-400 focus:outline-none focus:ring-2 focus:ring-sky-400/30"
+                            placeholder="Associate login"
+                            autoComplete="off"
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {sectionTab === "hourly_slots" ? (
         <ul className="divide-y divide-slate-200/80 border-t border-slate-200/80">
           {slots.map((slot) => {
             const isStandUp = slot.hour === 6 || slot.hour === STAND_UP_2_HOUR;
@@ -369,6 +497,7 @@ export function HourlyNotesPanel({ initialDate, rows, hasSupabase }: HourlyNotes
             );
           })}
         </ul>
+        ) : null}
       </div>
     </div>
   );

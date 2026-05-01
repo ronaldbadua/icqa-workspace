@@ -40,6 +40,7 @@ export async function saveAssociatePScores(
   if (error) return { ok: false, error: error.message };
   revalidatePath("/associate-table");
   revalidatePath("/process-path");
+  revalidatePath("/hourly-notes");
   return { ok: true };
 }
 
@@ -99,5 +100,6 @@ export async function saveAssociateLogin(
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
   revalidatePath("/associate-table");
+  revalidatePath("/hourly-notes");
   return { ok: true };
 }

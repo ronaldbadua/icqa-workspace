@@ -215,6 +215,31 @@ export type ProcessRow = {
   updated_at: string;
 };
 
+/** All associates with `associate_p_scores.login` for Hourly Notes and display-only use (no schema changes). */
+export async function getAssociateLoginsForWorkspace() {
+  const supabase = createAdminSupabaseClient() ?? (await createServerSupabaseClient());
+  if (!supabase) {
+    return [] as { id: string; login: string }[];
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+  const [assocRes, scoresRes] = await Promise.all([
+    db.from("associates").select("id").order("created_at", { ascending: true }),
+    db.from("associate_p_scores").select("associate_id, login"),
+  ]);
+  if (assocRes.error) return [];
+  const loginById = new Map<string, string>(
+    ((scoresRes.data ?? []) as { associate_id: string; login: string | null }[]).map((r) => [
+      r.associate_id,
+      (r.login ?? "").trim(),
+    ])
+  );
+  return ((assocRes.data ?? []) as { id: string }[]).map((a) => ({
+    id: a.id,
+    login: loginById.get(a.id) ?? "",
+  }));
+}
+
 export async function getSchedulingData(ym: string) {
   // Prefer admin client (bypasses RLS). Fall back to regular session client.
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();

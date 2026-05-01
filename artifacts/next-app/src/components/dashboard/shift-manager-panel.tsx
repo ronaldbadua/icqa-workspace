@@ -27,6 +27,12 @@ import { FormLabel } from "@/components/dashboard/status-pill";
 type TabId = "shift" | "associates" | "pooling";
 const POOLING_SHIFT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time"];
 
+/** Shown in scheduling UI; legacy `associates.name` is not displayed. */
+function associateLoginLabel(loginMap: Record<string, string>, associateId: string) {
+  const v = (loginMap[associateId] ?? "").trim();
+  return v.length > 0 ? v : "—";
+}
+
 function buildWeeks(days: { date: string; weekday: number; label: string }[]) {
   if (!days.length) return [] as ({ date: string; weekday: number; label: string } | null)[][];
   const cells: ({ date: string; weekday: number; label: string } | null)[] = [...Array(days[0].weekday).fill(null)];
@@ -242,7 +248,9 @@ export function ShiftManagerPanel({
                         >
                           <option value="">—</option>
                           {mainOpts.map((a) => (
-                            <option key={a.id} value={a.id}>{a.name}</option>
+                            <option key={a.id} value={a.id}>
+                              {associateLoginLabel(loginMap, a.id)}
+                            </option>
                           ))}
                         </select>
                       </div>
@@ -260,7 +268,8 @@ export function ShiftManagerPanel({
           <div className="border-b border-slate-200/80 px-4 py-3">
             <h3 className="text-sm font-bold text-slate-900">Associates List</h3>
             <p className="text-xs text-slate-500">
-              Add names and configure each associate&rsquo;s shift type and pooling eligibility. All changes save permanently to your database.
+              Add associate login and configure each associate&rsquo;s shift type and pooling eligibility. All changes save
+              permanently to your database.
             </p>
           </div>
 
@@ -269,12 +278,12 @@ export function ShiftManagerPanel({
             onSubmit={(e) => {
               e.preventDefault();
               const fd = new FormData(e.currentTarget);
-              const name = String(fd.get("name") || "");
+              const login = String(fd.get("login") || "");
               const shift_type = String(fd.get("shift_type") || "FHD") as ShiftType;
               setError(null);
               setSuccess(null);
               startTransition(async () => {
-                const res = await addAssociate(name, shift_type);
+                const res = await addAssociate(login, shift_type);
                 if (!res.ok) { setError(res.error); return; }
                 (e.target as HTMLFormElement).reset();
                 setSuccess("Associate added.");
@@ -283,11 +292,11 @@ export function ShiftManagerPanel({
             }}
           >
             <div className="min-w-[12rem] flex-1">
-              <FormLabel>Name</FormLabel>
+              <FormLabel>Associate Login</FormLabel>
               <input
-                name="name"
+                name="login"
                 className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
-                placeholder="Enter associate name"
+                placeholder="Enter associate login"
               />
             </div>
             <div className="w-36">
@@ -307,8 +316,7 @@ export function ShiftManagerPanel({
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                 <tr>
-                  <th className="px-4 py-2">Name</th>
-                  <th className="px-4 py-2">Log In</th>
+                  <th className="px-4 py-2">Associate Login</th>
                   <th className="px-4 py-2">Shift type</th>
                   <th className="px-4 py-2">Active</th>
                   <th className="px-4 py-2" />
@@ -317,7 +325,7 @@ export function ShiftManagerPanel({
               <tbody className="divide-y divide-slate-200/80">
                 {associates.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-400">
+                    <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">
                       No associates yet. Add one above.
                     </td>
                   </tr>
@@ -326,17 +334,10 @@ export function ShiftManagerPanel({
                   <tr key={a.id}>
                     <td className="px-4 py-2">
                       <input
-                        defaultValue={a.name}
-                        id={`name-${a.id}`}
-                        className="w-full max-w-xs rounded border border-slate-200 px-2 py-1"
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
                         id={`login-${a.id}`}
                         type="text"
                         defaultValue={loginMap[a.id] ?? ""}
-                        placeholder="Enter login"
+                        placeholder="Associate login"
                         className="w-full max-w-xs rounded border border-slate-200 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
                       />
                     </td>
@@ -376,15 +377,20 @@ export function ShiftManagerPanel({
                         className="ml-2 text-sky-700 hover:underline"
                         disabled={pending}
                         onClick={() => {
-                          const name = (document.getElementById(`name-${a.id}`) as HTMLInputElement).value;
-                          const login = (document.getElementById(`login-${a.id}`) as HTMLInputElement).value;
+                          const loginRaw = (document.getElementById(`login-${a.id}`) as HTMLInputElement).value;
+                          const loginTrim = loginRaw.trim();
+                          const nameForDb = loginTrim || a.name;
+                          if (!nameForDb.trim()) {
+                            setError("Associate login is required.");
+                            return;
+                          }
                           const shift_type = (document.getElementById(`shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
                           const is_active = (document.getElementById(`active-${a.id}`) as HTMLInputElement).checked;
                           setError(null);
                           startTransition(async () => {
                             const [assocRes, loginRes] = await Promise.all([
-                              updateAssociate({ id: a.id, name, shift_type, is_active }),
-                              saveAssociateLogin(a.id, login),
+                              updateAssociate({ id: a.id, name: nameForDb, shift_type, is_active }),
+                              saveAssociateLogin(a.id, loginRaw),
                             ]);
                             if (!assocRes.ok) setError(assocRes.error);
                             else if (!loginRes.ok) setError(loginRes.error);
@@ -421,9 +427,11 @@ export function ShiftManagerPanel({
                   startTransition(async () => {
                     for (const a of associates) {
                       const shift_type = (document.getElementById(`pool-shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
+                      const loginTrim = (loginMap[a.id] ?? "").trim();
+                      const nameForDb = loginTrim || a.name;
                       const assocRes = await updateAssociate({
                         id: a.id,
-                        name: a.name,
+                        name: nameForDb,
                         shift_type,
                         is_active: a.is_active,
                       });
@@ -452,7 +460,7 @@ export function ShiftManagerPanel({
               <table className="min-w-full text-sm">
                 <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                   <tr>
-                    <th className="px-4 py-2">Associate</th>
+                    <th className="px-4 py-2">Associate Login</th>
                     <th className="px-4 py-2">Shift type</th>
                     <th className="px-4 py-2">Sunday</th>
                     <th className="px-4 py-2">Monday</th>
@@ -468,7 +476,7 @@ export function ShiftManagerPanel({
                     const r = ruleByAssoc.get(a.id);
                     return (
                       <tr key={a.id}>
-                        <td className="px-4 py-2 font-medium text-slate-800">{a.name}</td>
+                        <td className="px-4 py-2 font-medium text-slate-800">{associateLoginLabel(loginMap, a.id)}</td>
                         <td className="px-4 py-2">
                           <select id={`pool-shift-${a.id}`} defaultValue={a.shift_type} className="rounded border border-slate-200 px-2 py-1">
                             {POOLING_SHIFT_TYPES.map((s) => (
