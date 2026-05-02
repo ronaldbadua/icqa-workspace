@@ -199,19 +199,14 @@ export async function autoAssignMonthly(
 
   const { start, end } = monthBounds(ym);
 
-  const [{ data: associates, error: assocErr }, { data: rules, error: ruleErr }] =
-    await Promise.all([
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (supabase as any).from("associates").select("id, name, shift_type, is_active, is_afm, is_ps").eq("is_active", true),
-      supabase
-        .from("pooling_rules")
-        .select(
-          "associate_id, allow_sunday, allow_monday, allow_tuesday, allow_wednesday, allow_thursday, allow_friday, allow_saturday"
-        ),
-    ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: associates, error: assocErr } = await (supabase as any)
+    .from("associates")
+    .select("id, name, shift_type, is_active, is_afm, is_ps")
+    .eq("is_active", true);
 
-  if (assocErr || ruleErr) {
-    return { ok: false, error: assocErr?.message ?? ruleErr?.message ?? "Failed to load data." };
+  if (assocErr) {
+    return { ok: false, error: assocErr.message };
   }
 
   const active = (associates ?? []).filter((a: { shift_type: string }) => a.shift_type !== "Vacation");
@@ -236,9 +231,6 @@ export async function autoAssignMonthly(
     days.push({ date, weekday: wd, slotType: defaultSlotTypeForDate(date) });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rulesByAssociate = new Map((rules ?? []).map((r: any) => [r.associate_id, r]));
-  const mainLoad = new Map<string, number>();
   const afmLoad = new Map<string, number>();
   const psLoad = new Map<string, number>();
 
@@ -249,24 +241,11 @@ export async function autoAssignMonthly(
     associate_id: string | null;
   }[] = [];
 
-  const DAY_FLAG_KEYS = [
-    "allow_sunday", "allow_monday", "allow_tuesday", "allow_wednesday",
-    "allow_thursday", "allow_friday", "allow_saturday",
-  ] as const;
-
   // Eligible AFM / PS pools (those with the flag set and active)
   const afmPool = active.filter((a: { is_afm: boolean }) => a.is_afm);
   const psPool  = active.filter((a: { is_ps: boolean })  => a.is_ps);
 
   for (const day of days) {
-    const dayFlagKey = DAY_FLAG_KEYS[day.weekday];
-
-    // ── Main assignment ──────────────────────────────────────────────
-    let pool = active.filter((a: { id: string }) => rulesByAssociate.get(a.id)?.[dayFlagKey] === true);
-    if (pool.length === 0) pool = active.slice();
-    const picked = pickBalanced(pool, mainLoad) ?? active[0].id;
-    rows.push({ assignment_date: day.date, role: "main", slot_type: day.slotType, associate_id: picked });
-
     // ── AFM assignment ───────────────────────────────────────────────
     if (afmPool.length > 0) {
       // Filter by shift-day eligibility
