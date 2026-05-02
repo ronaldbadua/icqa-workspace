@@ -1,7 +1,7 @@
 import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 
 /** All slot types shown in scheduling dropdowns. */
-export const SLOT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time", "Donut Shift", "Vacation"];
+export const SLOT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time", "Donut Shift", "Flex", "Vacation"];
 
 export type AssociateLike = { id: string; shift_type: ShiftType; is_active: boolean; name?: string };
 
