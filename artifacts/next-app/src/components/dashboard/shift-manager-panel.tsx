@@ -337,11 +337,6 @@ export function ShiftManagerPanel({
                           ))}
                         </select>
                       </div>
-                      {supId ? (
-                        <p className="mt-0.5 truncate pl-1 text-[0.65rem] font-medium text-sky-800">
-                          {loginMap[supId] || ""}
-                        </p>
-                      ) : null}
                     </div>
                   );
                 })}
