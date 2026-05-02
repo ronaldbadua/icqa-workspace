@@ -9,7 +9,7 @@ export type Json =
 export type HourlyNoteStatus = "resolved" | "pending" | "needs_attention" | "no_action_needed";
 export type ProcessStage = "pending" | "in_progress" | "done";
 export type ShiftType = "FHD" | "BHD" | "Part Time" | "Vacation";
-export type AssignmentRole = "main" | "pooling" | "backup" | "afm" | "ps";
+export type AssignmentRole = "main" | "pooling" | "backup" | "afm" | "afm_support" | "ps";
 
 export interface Database {
   public: {
