@@ -25,7 +25,7 @@ import {
 import { ConfigBanner } from "@/components/dashboard/config-banner";
 import { FormLabel } from "@/components/dashboard/status-pill";
 
-type TabId = "shift" | "associates";
+type TabId = "shift" | "ps" | "associates";
 
 function buildWeeks(days: { date: string; weekday: number; label: string }[]) {
   if (!days.length) return [] as ({ date: string; weekday: number; label: string } | null)[][];
@@ -134,20 +134,21 @@ export function ShiftManagerPanel({
     });
   };
 
-  const onAutoAssign = () => {
+  const onAutoAssign = (role: "afm" | "ps") => {
     if (!hasSupabase) { setError("Configure Supabase to auto-assign."); return; }
     setError(null);
     setSuccess(null);
     startTransition(async () => {
-      const res = await autoAssignMonthly(ym);
+      const res = await autoAssignMonthly(ym, role);
       if (!res.ok) { setError(res.error); return; }
-      setSuccess(`Schedule generated for ${ym}.`);
+      setSuccess(`${role.toUpperCase()} schedule generated for ${ym}.`);
       router.refresh();
     });
   };
 
   const leftTabs: { id: TabId; label: string }[] = [
     { id: "shift", label: "Shift Scheduling" },
+    { id: "ps", label: "Scheduling PS" },
   ];
 
   return (
@@ -200,7 +201,7 @@ export function ShiftManagerPanel({
             Associates List
           </button>
 
-          {tab !== "associates" ? (
+          {tab === "shift" || tab === "ps" ? (
             <>
               <button
                 type="button"
@@ -226,8 +227,18 @@ export function ShiftManagerPanel({
             <button
               type="button"
               disabled={pending}
-              onClick={() => onAutoAssign()}
+              onClick={() => onAutoAssign("afm")}
               className="rounded-lg bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-sky-700 disabled:opacity-60"
+            >
+              {pending ? "Generating…" : "Auto Assign Monthly"}
+            </button>
+          ) : null}
+          {tab === "ps" ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => onAutoAssign("ps")}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700 disabled:opacity-60"
             >
               {pending ? "Generating…" : "Auto Assign Monthly"}
             </button>
@@ -236,11 +247,12 @@ export function ShiftManagerPanel({
       </div>
 
 
+      {/* ── Shift Scheduling (AFM) ─────────────────────────────────── */}
       {tab === "shift" ? (
         <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
           <div className="border-b border-slate-200/80 px-4 py-3">
-            <h3 className="text-sm font-bold text-slate-900">Monthly Schedule</h3>
-            <p className="text-xs text-slate-500">One associate per day, pulled from Pooling rules. Saved to your database — navigate months freely.</p>
+            <h3 className="text-sm font-bold text-slate-900">AFM Monthly Schedule</h3>
+            <p className="text-xs text-slate-500">Fair rotation of AFM-trained associates. Saved to your database — navigate months freely.</p>
           </div>
           <div className="overflow-x-auto p-3">
             <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
@@ -251,64 +263,85 @@ export function ShiftManagerPanel({
             {weeks.map((week, wi) => (
               <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
                 {week.map((cell, ci) => {
-                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[120px] rounded-lg bg-slate-50/50" />;
+                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[80px] rounded-lg bg-slate-50/50" />;
                   const date = cell.date;
                   const slot = defaultSlotTypeForDate(date);
-
-                  const afmRow = byAssign.get(`${date}::afm`);
-                  const psRow  = byAssign.get(`${date}::ps`);
-                  const afmId  = afmRow?.associate_id ?? "";
-                  const psId   = psRow?.associate_id  ?? "";
-
                   const wd = weekdayFromYmd(date);
-                  // AFM candidates: is_afm=true, eligible by shift-day
+                  const afmRow = byAssign.get(`${date}::afm`);
+                  const afmId  = afmRow?.associate_id ?? "";
                   const afmOpts = associates.filter((a) => {
                     if (!(a as unknown as { is_afm?: boolean }).is_afm) return false;
                     return canAssignRole(a, wd);
                   });
-                  // PS candidates: is_ps=true, eligible by shift-day
+                  return (
+                    <div key={date} className="min-h-[80px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
+                      <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-sky-700">AFM</span>
+                        <select
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-sky-800 focus:outline-none"
+                          value={afmId}
+                          disabled={pending}
+                          onChange={(e) => onSlotOrAssign(date, "afm", slot, e.target.value || null)}
+                        >
+                          <option value="">—</option>
+                          {afmOpts.map((a) => (
+                            <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Scheduling PS ──────────────────────────────────────────── */}
+      {tab === "ps" ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
+          <div className="border-b border-slate-200/80 px-4 py-3">
+            <h3 className="text-sm font-bold text-slate-900">PS Monthly Schedule</h3>
+            <p className="text-xs text-slate-500">Fair rotation of PS-trained associates. Saved to your database — navigate months freely.</p>
+          </div>
+          <div className="overflow-x-auto p-3">
+            <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
+              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                <div key={d} className="py-1">{d}</div>
+              ))}
+            </div>
+            {weeks.map((week, wi) => (
+              <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
+                {week.map((cell, ci) => {
+                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[80px] rounded-lg bg-slate-50/50" />;
+                  const date = cell.date;
+                  const slot = defaultSlotTypeForDate(date);
+                  const wd = weekdayFromYmd(date);
+                  const psRow = byAssign.get(`${date}::ps`);
+                  const psId  = psRow?.associate_id ?? "";
                   const psOpts = associates.filter((a) => {
                     if (!(a as unknown as { is_ps?: boolean }).is_ps) return false;
                     return canAssignRole(a, wd);
                   });
-
                   return (
-                    <div key={date} className="min-h-[100px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
+                    <div key={date} className="min-h-[80px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
                       <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
-                      {/* AFM row */}
-                      {afmOpts.length > 0 ? (
-                        <div className="mt-1 flex items-center gap-1">
-                          <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-sky-700">AFM</span>
-                          <select
-                            className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-sky-800 focus:outline-none"
-                            value={afmId}
-                            disabled={pending}
-                            onChange={(e) => onSlotOrAssign(date, "afm", slot, e.target.value || null)}
-                          >
-                            <option value="">—</option>
-                            {afmOpts.map((a) => (
-                              <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : null}
-                      {/* PS row */}
-                      {psOpts.length > 0 ? (
-                        <div className="mt-1 flex items-center gap-1">
-                          <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-emerald-700">PS</span>
-                          <select
-                            className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-emerald-800 focus:outline-none"
-                            value={psId}
-                            disabled={pending}
-                            onChange={(e) => onSlotOrAssign(date, "ps", slot, e.target.value || null)}
-                          >
-                            <option value="">—</option>
-                            {psOpts.map((a) => (
-                              <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      ) : null}
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-emerald-700">PS</span>
+                        <select
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-emerald-800 focus:outline-none"
+                          value={psId}
+                          disabled={pending}
+                          onChange={(e) => onSlotOrAssign(date, "ps", slot, e.target.value || null)}
+                        >
+                          <option value="">—</option>
+                          {psOpts.map((a) => (
+                            <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
                   );
                 })}
