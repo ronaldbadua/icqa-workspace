@@ -408,10 +408,24 @@ export async function autoAssignPsBoth(
 
   if (assocErr) return { ok: false, error: assocErr.message };
 
-  const pool: { id: string; shift_type: ShiftType; is_active: boolean }[] = (associates ?? [])
+  let pool: { id: string; shift_type: ShiftType; is_active: boolean }[] = (associates ?? [])
     .filter((a: { shift_type: string; is_ps?: boolean }) =>
       a.shift_type !== "Vacation" && a.is_ps
     );
+
+  // Deduplicate by name — if the same person has two DB records, keep the
+  // more restrictive one (prefer any specific shift type over "Donut Shift").
+  {
+    const seen = new Map<string, typeof pool[0]>();
+    for (const a of pool) {
+      const key = ((a as unknown as { name?: string }).name ?? a.id).toLowerCase();
+      const prev = seen.get(key);
+      if (!prev || (prev.shift_type === "Donut Shift" && a.shift_type !== "Donut Shift")) {
+        seen.set(key, a);
+      }
+    }
+    pool = [...seen.values()];
+  }
 
   if (pool.length === 0) {
     return { ok: false, error: "No active associates are marked as PS. Check the Associates List." };
