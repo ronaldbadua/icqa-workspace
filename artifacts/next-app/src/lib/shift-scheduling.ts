@@ -1,7 +1,7 @@
 import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 
 /** All slot types shown in scheduling dropdowns. */
-export const SLOT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time", "Vacation"];
+export const SLOT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time", "Donut Shift", "Vacation"];
 
 export type AssociateLike = { id: string; shift_type: ShiftType; is_active: boolean; name?: string };
 
@@ -103,6 +103,7 @@ const SHIFT_DAYS: Record<string, number[]> = {
   FHD: [0, 1, 2, 3],
   BHD: [3, 4, 5, 6],
   "Part Time": [0, 6],
+  "Donut Shift": [0, 1, 2, 3, 4, 5, 6],
 };
 
 export function canAssignRole(associate: AssociateLike, weekday: number): boolean {
