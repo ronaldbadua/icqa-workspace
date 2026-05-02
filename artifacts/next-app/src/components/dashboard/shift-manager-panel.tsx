@@ -283,7 +283,7 @@ export function ShiftManagerPanel({
             {weeks.map((week, wi) => (
               <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
                 {week.map((cell, ci) => {
-                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[96px] rounded-lg bg-slate-50/50" />;
+                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[160px] rounded-lg bg-slate-50/50" />;
                   const date = cell.date;
                   const slot = defaultSlotTypeForDate(date);
                   const wd = weekdayFromYmd(date);
@@ -303,14 +303,14 @@ export function ShiftManagerPanel({
                   });
 
                   return (
-                    <div key={date} className="min-h-[96px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
+                    <div key={date} className="min-h-[160px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
                       <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
 
                       {/* AFM row */}
                       <div className="mt-1 flex items-center gap-1">
-                        <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[0.65rem] font-bold uppercase text-sky-700">AFM</span>
+                        <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[1.3rem] font-bold uppercase text-sky-700">AFM</span>
                         <select
-                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.75rem] text-sky-800 focus:outline-none"
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[1.5rem] text-sky-800 focus:outline-none"
                           value={afmId}
                           disabled={pending}
                           onChange={(e) => onSlotOrAssign(date, "afm", slot, e.target.value || null)}
@@ -324,9 +324,9 @@ export function ShiftManagerPanel({
 
                       {/* SUP row */}
                       <div className="mt-1 flex items-center gap-1">
-                        <span className="shrink-0 rounded bg-sky-200 px-1 py-0.5 text-[0.65rem] font-bold uppercase text-sky-800">SUP</span>
+                        <span className="shrink-0 rounded bg-sky-200 px-1 py-0.5 text-[1.3rem] font-bold uppercase text-sky-800">SUP</span>
                         <select
-                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.75rem] text-sky-900 focus:outline-none"
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[1.5rem] text-sky-900 focus:outline-none"
                           value={supId}
                           disabled={pending}
                           onChange={(e) => onSlotOrAssign(date, "afm_support", slot, e.target.value || null)}
