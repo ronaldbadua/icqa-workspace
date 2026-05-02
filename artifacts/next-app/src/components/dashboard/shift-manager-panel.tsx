@@ -272,52 +272,115 @@ export function ShiftManagerPanel({
 
       {/* ── Scheduling AFM ─────────────────────────────────────────── */}
       {tab === "shift" ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-          <div className="border-b border-slate-200/80 px-4 py-3">
-            <h3 className="text-sm font-bold text-slate-900">AFM Monthly Schedule</h3>
-            <p className="text-xs text-slate-500">Fair rotation of AFM-trained associates. Saved to your database — navigate months freely.</p>
-          </div>
-          <div className="overflow-x-auto p-3">
-            <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-                <div key={d} className="py-1">{d}</div>
+        <div className="space-y-4">
+          {/* AFM primary rotation */}
+          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
+            <div className="border-b border-slate-200/80 px-4 py-3">
+              <h3 className="text-sm font-bold text-slate-900">AFM Monthly Schedule</h3>
+              <p className="text-xs text-slate-500">Fair rotation of AFM-trained associates. Saved to your database — navigate months freely.</p>
+            </div>
+            <div className="overflow-x-auto p-3">
+              <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                  <div key={d} className="py-1">{d}</div>
+                ))}
+              </div>
+              {weeks.map((week, wi) => (
+                <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
+                  {week.map((cell, ci) => {
+                    if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[80px] rounded-lg bg-slate-50/50" />;
+                    const date = cell.date;
+                    const slot = defaultSlotTypeForDate(date);
+                    const wd = weekdayFromYmd(date);
+                    const afmRow = byAssign.get(`${date}::afm`);
+                    const afmId  = afmRow?.associate_id ?? "";
+                    const afmOpts = associates.filter((a) => {
+                      if (!(a as unknown as { is_afm?: boolean }).is_afm) return false;
+                      return canAssignRole(a, wd);
+                    });
+                    return (
+                      <div key={date} className="min-h-[80px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
+                        <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-sky-700">AFM</span>
+                          <select
+                            className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-sky-800 focus:outline-none"
+                            value={afmId}
+                            disabled={pending}
+                            onChange={(e) => onSlotOrAssign(date, "afm", slot, e.target.value || null)}
+                          >
+                            <option value="">—</option>
+                            {afmOpts.map((a) => (
+                              <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {afmId ? (
+                          <p className="mt-0.5 truncate pl-1 text-[0.65rem] font-medium text-sky-700">
+                            {loginMap[afmId] || ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               ))}
             </div>
-            {weeks.map((week, wi) => (
-              <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
-                {week.map((cell, ci) => {
-                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[80px] rounded-lg bg-slate-50/50" />;
-                  const date = cell.date;
-                  const slot = defaultSlotTypeForDate(date);
-                  const wd = weekdayFromYmd(date);
-                  const afmRow = byAssign.get(`${date}::afm`);
-                  const afmId  = afmRow?.associate_id ?? "";
-                  const afmOpts = associates.filter((a) => {
-                    if (!(a as unknown as { is_afm?: boolean }).is_afm) return false;
-                    return canAssignRole(a, wd);
-                  });
-                  return (
-                    <div key={date} className="min-h-[80px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
-                      <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
-                      <div className="mt-1 flex items-center gap-1">
-                        <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-sky-700">AFM</span>
-                        <select
-                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-sky-800 focus:outline-none"
-                          value={afmId}
-                          disabled={pending}
-                          onChange={(e) => onSlotOrAssign(date, "afm", slot, e.target.value || null)}
-                        >
-                          <option value="">—</option>
-                          {afmOpts.map((a) => (
-                            <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })}
+          </div>
+
+          {/* AFM Support — independent rotation from the same AFM pool */}
+          <div className="overflow-hidden rounded-xl border border-sky-200/60 bg-white shadow-sm">
+            <div className="border-b border-sky-200/60 px-4 py-3">
+              <h3 className="text-sm font-bold text-slate-900">AFM Support Monthly Schedule</h3>
+              <p className="text-xs text-slate-500">Independent rotation from the same AFM pool — same shift-type day rules apply.</p>
+            </div>
+            <div className="overflow-x-auto p-3">
+              <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                  <div key={d} className="py-1">{d}</div>
+                ))}
               </div>
-            ))}
+              {weeks.map((week, wi) => (
+                <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
+                  {week.map((cell, ci) => {
+                    if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[80px] rounded-lg bg-slate-50/50" />;
+                    const date = cell.date;
+                    const slot = defaultSlotTypeForDate(date);
+                    const wd = weekdayFromYmd(date);
+                    const supRow = byAssign.get(`${date}::afm_support`);
+                    const supId  = supRow?.associate_id ?? "";
+                    const supOpts = associates.filter((a) => {
+                      if (!(a as unknown as { is_afm?: boolean }).is_afm) return false;
+                      return canAssignRole(a, wd);
+                    });
+                    return (
+                      <div key={date} className="min-h-[80px] rounded-lg border border-sky-100 bg-sky-50/20 p-2 text-left">
+                        <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className="shrink-0 rounded bg-sky-200 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-sky-800">SUP</span>
+                          <select
+                            className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-sky-900 focus:outline-none"
+                            value={supId}
+                            disabled={pending}
+                            onChange={(e) => onSlotOrAssign(date, "afm_support", slot, e.target.value || null)}
+                          >
+                            <option value="">—</option>
+                            {supOpts.map((a) => (
+                              <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {supId ? (
+                          <p className="mt-0.5 truncate pl-1 text-[0.65rem] font-medium text-sky-800">
+                            {loginMap[supId] || ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       ) : null}
