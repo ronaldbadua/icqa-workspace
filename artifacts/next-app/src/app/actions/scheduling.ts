@@ -192,7 +192,8 @@ function pickBalanced(candidates: { id: string }[], load: Map<string, number>) {
 }
 
 export async function autoAssignMonthly(
-  ym: string
+  ym: string,
+  role: "afm" | "ps" = "afm"
 ): Promise<{ ok: true; created: number } | { ok: false; error: string }> {
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
@@ -205,34 +206,30 @@ export async function autoAssignMonthly(
     .select("id, name, shift_type, is_active, is_afm, is_ps")
     .eq("is_active", true);
 
-  if (assocErr) {
-    return { ok: false, error: assocErr.message };
-  }
+  if (assocErr) return { ok: false, error: assocErr.message };
 
   const active = (associates ?? []).filter((a: { shift_type: string }) => a.shift_type !== "Vacation");
-  if (active.length === 0) {
-    return { ok: false, error: "Add at least one active associate who is not on Vacation." };
-  }
 
-  // Always clear and regenerate the full month
+  // Only delete + regenerate assignments for this specific role
   const { error: delErr } = await supabase
     .from("monthly_assignments")
     .delete()
     .gte("assignment_date", start)
-    .lte("assignment_date", end);
+    .lte("assignment_date", end)
+    .eq("role", role);
   if (delErr) return { ok: false, error: delErr.message };
+
+  const pool = active.filter((a: { is_afm?: boolean; is_ps?: boolean }) =>
+    role === "afm" ? a.is_afm : a.is_ps
+  );
+
+  if (pool.length === 0) {
+    return { ok: false, error: `No active associates are marked as ${role.toUpperCase()}. Check the Associates List.` };
+  }
 
   const [sy, sm] = ym.split("-").map(Number);
   const daysInMonth = new Date(sy, sm, 0).getDate();
-  const days: { date: string; weekday: number; slotType: ShiftType }[] = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = `${sy}-${String(sm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    const wd = weekdayFromYmd(date);
-    days.push({ date, weekday: wd, slotType: defaultSlotTypeForDate(date) });
-  }
-
-  const afmLoad = new Map<string, number>();
-  const psLoad = new Map<string, number>();
+  const load = new Map<string, number>();
 
   const rows: {
     assignment_date: string;
@@ -241,32 +238,23 @@ export async function autoAssignMonthly(
     associate_id: string | null;
   }[] = [];
 
-  // Eligible AFM / PS pools (those with the flag set and active)
-  const afmPool = active.filter((a: { is_afm: boolean }) => a.is_afm);
-  const psPool  = active.filter((a: { is_ps: boolean })  => a.is_ps);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${sy}-${String(sm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const wd = weekdayFromYmd(date);
+    const slotType = defaultSlotTypeForDate(date);
 
-  for (const day of days) {
-    // ── AFM assignment ───────────────────────────────────────────────
-    if (afmPool.length > 0) {
-      // Filter by shift-day eligibility
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const eligible = afmPool.filter((a: any) => canAssignRole(a as { id: string; shift_type: ShiftType; is_active: boolean }, day.weekday));
-      const afmPool2 = eligible.length > 0 ? eligible : afmPool;
-      const afmPicked = pickBalanced(afmPool2, afmLoad) ?? afmPool[0].id;
-      rows.push({ assignment_date: day.date, role: "afm", slot_type: day.slotType, associate_id: afmPicked });
-    }
-
-    // ── PS assignment ────────────────────────────────────────────────
-    if (psPool.length > 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const eligible = psPool.filter((a: any) => canAssignRole(a as { id: string; shift_type: ShiftType; is_active: boolean }, day.weekday));
-      const psPool2 = eligible.length > 0 ? eligible : psPool;
-      const psPicked = pickBalanced(psPool2, psLoad) ?? psPool[0].id;
-      rows.push({ assignment_date: day.date, role: "ps", slot_type: day.slotType, associate_id: psPicked });
-    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const eligible = pool.filter((a: any) =>
+      canAssignRole(a as { id: string; shift_type: ShiftType; is_active: boolean }, wd)
+    );
+    const candidates = eligible.length > 0 ? eligible : pool;
+    const picked = pickBalanced(candidates, load) ?? pool[0].id;
+    rows.push({ assignment_date: date, role, slot_type: slotType, associate_id: picked });
   }
 
-  const { error: upsertErr } = await supabase.from("monthly_assignments").upsert(rows, { onConflict: "assignment_date,role" });
+  const { error: upsertErr } = await supabase
+    .from("monthly_assignments")
+    .upsert(rows, { onConflict: "assignment_date,role" });
   if (upsertErr) return { ok: false, error: upsertErr.message };
 
   revalidatePath("/scheduling");
