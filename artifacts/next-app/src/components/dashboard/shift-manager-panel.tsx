@@ -253,46 +253,28 @@ export function ShiftManagerPanel({
                 {week.map((cell, ci) => {
                   if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[120px] rounded-lg bg-slate-50/50" />;
                   const date = cell.date;
-                  const mainRow = byAssign.get(`${date}::main`);
-                  const slot = mainRow?.slot_type ?? defaultSlotTypeForDate(date);
-                  const mainId = mainRow?.associate_id ?? "";
-                  const mainOpts = eligibleOptions(date, slot, "main", []);
+                  const slot = defaultSlotTypeForDate(date);
 
                   const afmRow = byAssign.get(`${date}::afm`);
                   const psRow  = byAssign.get(`${date}::ps`);
                   const afmId  = afmRow?.associate_id ?? "";
                   const psId   = psRow?.associate_id  ?? "";
 
+                  const wd = weekdayFromYmd(date);
                   // AFM candidates: is_afm=true, eligible by shift-day
                   const afmOpts = associates.filter((a) => {
                     if (!(a as unknown as { is_afm?: boolean }).is_afm) return false;
-                    const wd = weekdayFromYmd(date);
                     return canAssignRole(a, wd);
                   });
                   // PS candidates: is_ps=true, eligible by shift-day
                   const psOpts = associates.filter((a) => {
                     if (!(a as unknown as { is_ps?: boolean }).is_ps) return false;
-                    const wd = weekdayFromYmd(date);
                     return canAssignRole(a, wd);
                   });
 
                   return (
-                    <div key={date} className="min-h-[120px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
+                    <div key={date} className="min-h-[100px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
                       <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
-                      {/* Main */}
-                      <div className="mt-1">
-                        <select
-                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-slate-800 focus:outline-none"
-                          value={mainId}
-                          disabled={pending || slot === "Vacation"}
-                          onChange={(e) => onSlotOrAssign(date, "main", slot, e.target.value || null)}
-                        >
-                          <option value="">—</option>
-                          {mainOpts.map((a) => (
-                            <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
-                          ))}
-                        </select>
-                      </div>
                       {/* AFM row */}
                       {afmOpts.length > 0 ? (
                         <div className="mt-1 flex items-center gap-1">
