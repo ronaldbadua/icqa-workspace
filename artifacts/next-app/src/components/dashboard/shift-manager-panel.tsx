@@ -7,6 +7,7 @@ import {
   autoAssignMonthly,
   deleteAssociate,
   updateAssociate,
+  updateAssociateRole,
   upsertAssignment,
   upsertPoolingRule,
 } from "@/app/actions/scheduling";
@@ -70,8 +71,37 @@ export function ShiftManagerPanel({
   const router = useRouter();
   const [tab, setTab] = useState<TabId>("shift");
   const [pending, startTransition] = useTransition();
+  const [rolePending, startRoleTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Reactive AFM / PS state — initialised from server data
+  const [afmMap, setAfmMap] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(associates.map((a) => [a.id, a.is_afm ?? false]))
+  );
+  const [psMap, setPsMap] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(associates.map((a) => [a.id, a.is_ps ?? false]))
+  );
+
+  const toggleAfm = (id: string) => {
+    const next = !afmMap[id];
+    setAfmMap((prev) => ({ ...prev, [id]: next }));
+    if (!hasSupabase) return;
+    startRoleTransition(async () => {
+      const res = await updateAssociateRole({ id, is_afm: next, is_ps: psMap[id] ?? false });
+      if (!res.ok) setError(res.error);
+    });
+  };
+
+  const togglePs = (id: string) => {
+    const next = !psMap[id];
+    setPsMap((prev) => ({ ...prev, [id]: next }));
+    if (!hasSupabase) return;
+    startRoleTransition(async () => {
+      const res = await updateAssociateRole({ id, is_afm: afmMap[id] ?? false, is_ps: next });
+      if (!res.ok) setError(res.error);
+    });
+  };
 
   const byAssign = useMemo(() => assignmentMap(assignments), [assignments]);
   const ruleByAssoc = useMemo(() => new Map(rules.map((r) => [r.associate_id, r])), [rules]);
@@ -309,6 +339,8 @@ export function ShiftManagerPanel({
               <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
                 <tr>
                   <th className="px-4 py-2">Log In</th>
+                  <th className="px-4 py-2 text-center">AFM</th>
+                  <th className="px-4 py-2 text-center">PS</th>
                   <th className="px-4 py-2">Shift type</th>
                   <th className="px-4 py-2">Active</th>
                   <th className="px-4 py-2" />
@@ -317,13 +349,13 @@ export function ShiftManagerPanel({
               <tbody className="divide-y divide-slate-200/80">
                 {associates.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-4 py-6 text-center text-sm text-slate-400">
+                    <td colSpan={6} className="px-4 py-6 text-center text-sm text-slate-400">
                       No associates yet. Add one above.
                     </td>
                   </tr>
                 ) : null}
                 {associates.map((a) => (
-                  <tr key={a.id}>
+                  <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-2">
                       <input
                         id={`login-${a.id}`}
@@ -332,6 +364,44 @@ export function ShiftManagerPanel({
                         placeholder="Enter login"
                         className="w-full max-w-xs rounded border border-slate-200 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
                       />
+                    </td>
+                    {/* AFM checkbox */}
+                    <td className="px-4 py-2 text-center">
+                      <button
+                        type="button"
+                        aria-label="Toggle AFM"
+                        disabled={rolePending}
+                        onClick={() => toggleAfm(a.id)}
+                        className={[
+                          "mx-auto flex h-6 w-6 items-center justify-center rounded border-2 transition-all",
+                          afmMap[a.id]
+                            ? "border-sky-600 bg-sky-600 text-white"
+                            : "border-slate-300 bg-white text-transparent hover:border-sky-400",
+                        ].join(" ")}
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
+                    </td>
+                    {/* PS checkbox */}
+                    <td className="px-4 py-2 text-center">
+                      <button
+                        type="button"
+                        aria-label="Toggle PS"
+                        disabled={rolePending}
+                        onClick={() => togglePs(a.id)}
+                        className={[
+                          "mx-auto flex h-6 w-6 items-center justify-center rounded border-2 transition-all",
+                          psMap[a.id]
+                            ? "border-emerald-600 bg-emerald-600 text-white"
+                            : "border-slate-300 bg-white text-transparent hover:border-emerald-400",
+                        ].join(" ")}
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </button>
                     </td>
                     <td className="px-4 py-2">
                       <select
@@ -347,7 +417,7 @@ export function ShiftManagerPanel({
                     <td className="px-4 py-2">
                       <input type="checkbox" defaultChecked={a.is_active} id={`active-${a.id}`} />
                     </td>
-                    <td className="px-4 py-2 text-right">
+                    <td className="px-4 py-2 text-right whitespace-nowrap">
                       <button
                         type="button"
                         className="text-rose-600 hover:underline"
