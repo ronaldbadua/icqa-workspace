@@ -7,8 +7,11 @@ export type { DatabaseEntryRow };
 
 export type AssociateRow = {
   id: string;
+  name: string;
   shift_type: ShiftType;
   is_active: boolean;
+  is_afm: boolean;
+  is_ps: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -214,31 +217,6 @@ export type ProcessRow = {
   updated_at: string;
 };
 
-/** All associates with `associate_p_scores.login` for Hourly Notes and display-only use (no schema changes). */
-export async function getAssociateLoginsForWorkspace() {
-  const supabase = createAdminSupabaseClient() ?? (await createServerSupabaseClient());
-  if (!supabase) {
-    return [] as { id: string; login: string }[];
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = supabase as any;
-  const [assocRes, scoresRes] = await Promise.all([
-    db.from("associates").select("id").order("created_at", { ascending: true }),
-    db.from("associate_p_scores").select("associate_id, login"),
-  ]);
-  if (assocRes.error) return [];
-  const loginById = new Map<string, string>(
-    ((scoresRes.data ?? []) as { associate_id: string; login: string | null }[]).map((r) => [
-      r.associate_id,
-      (r.login ?? "").trim(),
-    ])
-  );
-  return ((assocRes.data ?? []) as { id: string }[]).map((a) => ({
-    id: a.id,
-    login: loginById.get(a.id) ?? "",
-  }));
-}
-
 export async function getSchedulingData(ym: string) {
   // Prefer admin client (bypasses RLS). Fall back to regular session client.
   const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
@@ -254,7 +232,7 @@ export async function getSchedulingData(ym: string) {
 
   const { start, end } = monthBounds(ym);
   const [associatesRes, rulesRes, assignmentsRes] = await Promise.all([
-    supabase.from("associates").select("id, shift_type, is_active, created_at, updated_at").order("created_at", { ascending: true }),
+    supabase.from("associates").select("id, name, shift_type, is_active, is_afm, is_ps, created_at, updated_at").order("name", { ascending: true }),
     supabase.from("pooling_rules").select("id, associate_id, allow_sunday, allow_monday, allow_tuesday, allow_wednesday, allow_thursday, allow_friday, allow_saturday, created_at, updated_at"),
     supabase
       .from("monthly_assignments")
@@ -275,7 +253,8 @@ export async function getSchedulingData(ym: string) {
   }
 
   return {
-    associates: (associatesRes.data ?? []) as AssociateRow[],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    associates: (associatesRes.data ?? []) as any as AssociateRow[],
     rules: (rulesRes.data ?? []) as PoolingRuleRow[],
     assignments: (assignmentsRes.data ?? []) as MonthlyAssignmentRow[],
     monthDays: monthDays(ym),
