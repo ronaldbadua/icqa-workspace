@@ -8,7 +8,7 @@ type ActionResult = { ok: true } | { ok: false; error: string };
 export type StaffingRecord = {
   id: string;
   staffing_date: string;
-  associate_login: string;
+  associate_name: string;
   shift_type: string;
   role: string;
   status: string;
@@ -19,7 +19,7 @@ export type StaffingRecord = {
 
 export type StaffingInput = {
   staffing_date: string;
-  associate_login: string;
+  associate_name: string;
   shift_type: string;
   role: string;
   status: string;
@@ -44,27 +44,13 @@ export async function getStaffingRecords(
     .order("created_at", { ascending: true });
 
   if (error) return { data: [], error: (error as { message: string }).message };
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
-  return {
-    data: rows.map((r) => ({
-      id: r.id as string,
-      staffing_date: r.staffing_date as string,
-      associate_login: (r.associate_name as string) ?? "",
-      shift_type: r.shift_type as string,
-      role: r.role as string,
-      status: r.status as string,
-      notes: r.notes as string,
-      created_at: r.created_at as string,
-      updated_at: r.updated_at as string,
-    })),
-    error: null,
-  };
+  return { data: (data ?? []) as StaffingRecord[], error: null };
 }
 
 export async function createStaffingRecord(
   input: StaffingInput
 ): Promise<ActionResult> {
-  if (!input.associate_login.trim()) return { ok: false, error: "Associate login is required." };
+  if (!input.associate_name.trim()) return { ok: false, error: "Associate name is required." };
   const supabase = await getSupabase();
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 
@@ -73,7 +59,7 @@ export async function createStaffingRecord(
     .from("staffing_records")
     .insert({
       staffing_date: input.staffing_date,
-      associate_name: input.associate_login.trim(),
+      associate_name: input.associate_name.trim(),
       shift_type: input.shift_type,
       role: input.role,
       status: input.status,
@@ -92,16 +78,11 @@ export async function updateStaffingRecord(
   const supabase = await getSupabase();
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 
-  const { associate_login, ...rest } = input;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const patch: Record<string, unknown> = { ...rest };
-  if (associate_login !== undefined) {
-    patch.associate_name = associate_login.trim();
-  }
-  patch.updated_at = new Date().toISOString();
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any).from("staffing_records").update(patch).eq("id", id);
+  const { error } = await (supabase as any)
+    .from("staffing_records")
+    .update({ ...input, updated_at: new Date().toISOString() })
+    .eq("id", id);
 
   if (error) return { ok: false, error: (error as { message: string }).message };
   revalidatePath("/staffing");
