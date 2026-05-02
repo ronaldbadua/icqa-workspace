@@ -388,6 +388,100 @@ export async function autoAssignAfmBoth(
 }
 
 /**
+ * Generates PS and PS Support assignments together in one coordinated pass.
+ * Rule: on every day, the PS Support pick must be a different person than the PS pick.
+ * Both rotations also obey the no-back-to-back-consecutive-day rule independently.
+ */
+export async function autoAssignPsBoth(
+  ym: string
+): Promise<{ ok: true; created: number } | { ok: false; error: string }> {
+  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
+  if (!supabase) return { ok: false, error: "Supabase is not configured on the server." };
+
+  const { start, end } = monthBounds(ym);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: associates, error: assocErr } = await (supabase as any)
+    .from("associates")
+    .select("id, name, shift_type, is_active, is_ps")
+    .eq("is_active", true);
+
+  if (assocErr) return { ok: false, error: assocErr.message };
+
+  const pool: { id: string; shift_type: ShiftType; is_active: boolean }[] = (associates ?? [])
+    .filter((a: { shift_type: string; is_ps?: boolean }) =>
+      a.shift_type !== "Vacation" && a.is_ps
+    );
+
+  if (pool.length === 0) {
+    return { ok: false, error: "No active associates are marked as PS. Check the Associates List." };
+  }
+
+  const { error: delErr } = await supabase
+    .from("monthly_assignments")
+    .delete()
+    .gte("assignment_date", start)
+    .lte("assignment_date", end)
+    .in("role", ["ps", "ps_support"]);
+  if (delErr) return { ok: false, error: delErr.message };
+
+  const [sy, sm] = ym.split("-").map(Number);
+  const daysInMonth = new Date(sy, sm, 0).getDate();
+
+  const psLoad  = new Map<string, number>(pool.map((a) => [a.id, 0]));
+  const supLoad = new Map<string, number>(pool.map((a) => [a.id, 0]));
+
+  const rows: {
+    assignment_date: string;
+    role: AssignmentRole;
+    slot_type: ShiftType;
+    associate_id: string;
+  }[] = [];
+
+  let lastPsId:  string | null = null;
+  let lastSupId: string | null = null;
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = `${sy}-${String(sm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const wd = weekdayFromYmd(date);
+    const slotType = defaultSlotTypeForDate(date);
+
+    const eligible = pool.filter((a) => canAssignRole(a, wd));
+    if (eligible.length === 0) continue;
+
+    // ── Pick PS ───────────────────────────────────────────────────────────
+    const psPreferred = eligible.filter((a) => a.id !== lastPsId);
+    const psCandidates = psPreferred.length > 0 ? psPreferred : eligible;
+    const psPicked = pickBalanced(psCandidates, psLoad);
+    if (!psPicked) continue;
+    lastPsId = psPicked;
+    rows.push({ assignment_date: date, role: "ps", slot_type: slotType, associate_id: psPicked });
+
+    // ── Pick PS Support — NEVER the same person as PS that day ────────────
+    const supEligible = eligible.filter((a) => a.id !== psPicked);
+    if (supEligible.length === 0) { lastSupId = null; continue; }
+    const supPreferred = supEligible.filter((a) => a.id !== lastSupId);
+    const supCandidates = supPreferred.length > 0 ? supPreferred : supEligible;
+    const supPicked = pickBalanced(supCandidates, supLoad);
+    if (!supPicked) continue;
+    lastSupId = supPicked;
+    rows.push({ assignment_date: date, role: "ps_support", slot_type: slotType, associate_id: supPicked });
+  }
+
+  if (rows.length === 0) {
+    return { ok: false, error: "No eligible days found for PS pool this month." };
+  }
+
+  const { error: upsertErr } = await supabase
+    .from("monthly_assignments")
+    .upsert(rows, { onConflict: "assignment_date,role" });
+  if (upsertErr) return { ok: false, error: upsertErr.message };
+
+  revalidatePath("/scheduling");
+  return { ok: true, created: rows.length };
+}
+
+/**
  * Creates missing pooling_rules rows for associates (safe if rules already exist).
  * NOTE: Do NOT call revalidatePath here — this function is invoked during page
  * render and Next.js 15 forbids revalidatePath inside renders.
