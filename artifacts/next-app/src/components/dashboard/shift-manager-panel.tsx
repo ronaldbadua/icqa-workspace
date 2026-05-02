@@ -6,6 +6,7 @@ import {
   addAssociate,
   autoAssignAfmBoth,
   autoAssignMonthly,
+  autoAssignPsBoth,
   deleteAssociate,
   updateAssociate,
   updateAssociateRole,
@@ -257,7 +258,16 @@ export function ShiftManagerPanel({
             <button
               type="button"
               disabled={pending}
-              onClick={() => onAutoAssign("ps")}
+              onClick={() => {
+                if (!hasSupabase) { setError("Configure Supabase to auto-assign."); return; }
+                setError(null); setSuccess(null);
+                startTransition(async () => {
+                  const r = await autoAssignPsBoth(ym);
+                  if (!r.ok) { setError(r.error); return; }
+                  setSuccess(`PS & PS Support schedules generated for ${ym}.`);
+                  router.refresh();
+                });
+              }}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-emerald-700 disabled:opacity-60"
             >
               {pending ? "Generating…" : "Auto Assign Monthly"}
@@ -346,12 +356,12 @@ export function ShiftManagerPanel({
         </div>
       ) : null}
 
-      {/* ── Scheduling PS ──────────────────────────────────────────── */}
+      {/* ── Scheduling PS (combined PS + PS Support) ──────────────── */}
       {tab === "ps" ? (
         <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
           <div className="border-b border-slate-200/80 px-4 py-3">
             <h3 className="text-sm font-bold text-slate-900">PS Monthly Schedule</h3>
-            <p className="text-xs text-slate-500">Fair rotation of PS-trained associates. Saved to your database — navigate months freely.</p>
+            <p className="text-xs text-slate-500">PS and PS Support — fair rotation from the same pool, never the same person on the same day.</p>
           </div>
           <div className="overflow-x-auto p-3">
             <div className="grid min-w-[720px] grid-cols-7 gap-1 text-center text-[0.65rem] font-semibold uppercase text-slate-500">
@@ -362,29 +372,56 @@ export function ShiftManagerPanel({
             {weeks.map((week, wi) => (
               <div key={wi} className="grid min-w-[720px] grid-cols-7 gap-1">
                 {week.map((cell, ci) => {
-                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[80px] rounded-lg bg-slate-50/50" />;
+                  if (!cell) return <div key={`e-${wi}-${ci}`} className="min-h-[160px] rounded-lg bg-slate-50/50" />;
                   const date = cell.date;
                   const slot = defaultSlotTypeForDate(date);
                   const wd = weekdayFromYmd(date);
-                  const psRow = byAssign.get(`${date}::ps`);
-                  const psId  = psRow?.associate_id ?? "";
+
+                  const psRow  = byAssign.get(`${date}::ps`);
+                  const psId   = psRow?.associate_id ?? "";
+                  const supRow = byAssign.get(`${date}::ps_support`);
+                  const supId  = supRow?.associate_id ?? "";
+
                   const psOpts = associates.filter((a) => {
                     if (!(a as unknown as { is_ps?: boolean }).is_ps) return false;
                     return canAssignRole(a, wd);
                   });
+                  const supOpts = associates.filter((a) => {
+                    if (!(a as unknown as { is_ps?: boolean }).is_ps) return false;
+                    return canAssignRole(a, wd);
+                  });
+
                   return (
-                    <div key={date} className="min-h-[80px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
+                    <div key={date} className="min-h-[160px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
                       <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
+
+                      {/* PS row */}
                       <div className="mt-1 flex items-center gap-1">
-                        <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-emerald-700">PS</span>
+                        <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[1.3rem] font-bold uppercase text-emerald-700">PS</span>
                         <select
-                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-emerald-800 focus:outline-none"
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[1.5rem] text-emerald-800 focus:outline-none"
                           value={psId}
                           disabled={pending}
                           onChange={(e) => onSlotOrAssign(date, "ps", slot, e.target.value || null)}
                         >
                           <option value="">—</option>
                           {psOpts.map((a) => (
+                            <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* PS Support row */}
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="shrink-0 rounded bg-emerald-200 px-1 py-0.5 text-[1.3rem] font-bold uppercase text-emerald-800">SUP</span>
+                        <select
+                          className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[1.5rem] text-emerald-900 focus:outline-none"
+                          value={supId}
+                          disabled={pending}
+                          onChange={(e) => onSlotOrAssign(date, "ps_support", slot, e.target.value || null)}
+                        >
+                          <option value="">—</option>
+                          {supOpts.map((a) => (
                             <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
                           ))}
                         </select>
