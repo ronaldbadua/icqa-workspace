@@ -3,7 +3,7 @@ import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 /** All slot types shown in scheduling dropdowns. */
 export const SLOT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time", "Vacation"];
 
-export type AssociateLike = { id: string; shift_type: ShiftType; is_active: boolean };
+export type AssociateLike = { id: string; shift_type: ShiftType; is_active: boolean; name?: string };
 
 export type PoolingRuleLike = {
   associate_id: string;
@@ -93,9 +93,27 @@ export function canAssignDay(
   return associate.shift_type === slotType;
 }
 
-export function labelForAssociate(a: AssociateLike | undefined, login: string) {
+/**
+ * AFM / PS eligibility: based purely on shift_type → allowed weekdays.
+ * FHD  → Sun(0) Mon(1) Tue(2) Wed(3)
+ * BHD  → Wed(3) Thu(4) Fri(5) Sat(6)
+ * Part Time → Sat(6) Sun(0)
+ */
+const SHIFT_DAYS: Record<string, number[]> = {
+  FHD: [0, 1, 2, 3],
+  BHD: [3, 4, 5, 6],
+  "Part Time": [0, 6],
+};
+
+export function canAssignRole(associate: AssociateLike, weekday: number): boolean {
+  if (!associate.is_active) return false;
+  const allowed = SHIFT_DAYS[associate.shift_type];
+  return allowed ? allowed.includes(weekday) : false;
+}
+
+export function labelForAssociate(a: AssociateLike | undefined, name: string) {
   if (!a) return "";
-  return `${login} (${a.shift_type})`;
+  return `${name} (${a.shift_type})`;
 }
 
 export function assignmentKey(date: string, role: AssignmentRole) {
