@@ -208,9 +208,26 @@ export async function autoAssignMonthly(
 
   if (assocErr) return { ok: false, error: assocErr.message };
 
-  const active = (associates ?? []).filter((a: { shift_type: string }) => a.shift_type !== "Vacation");
+  // Exclude Vacation associates
+  const active = (associates ?? []).filter(
+    (a: { shift_type: string }) => a.shift_type !== "Vacation"
+  );
 
-  // Only delete + regenerate assignments for this specific role
+  // Build the eligible pool for this role (AFM or PS flag must be set)
+  const pool: { id: string; shift_type: ShiftType; is_active: boolean }[] = active.filter(
+    (a: { is_afm?: boolean; is_ps?: boolean }) =>
+      role === "ps" ? a.is_ps : a.is_afm
+  );
+
+  const label = role === "ps" ? "PS" : "AFM";
+  if (pool.length === 0) {
+    return {
+      ok: false,
+      error: `No active associates are marked as ${label}. Check the Associates List.`,
+    };
+  }
+
+  // Delete only this role's assignments for the month, then regenerate
   const { error: delErr } = await supabase
     .from("monthly_assignments")
     .delete()
@@ -219,24 +236,17 @@ export async function autoAssignMonthly(
     .eq("role", role);
   if (delErr) return { ok: false, error: delErr.message };
 
-  const pool = active.filter((a: { is_afm?: boolean; is_ps?: boolean }) =>
-    role === "ps" ? a.is_ps : a.is_afm
-  );
-
-  const label = role === "ps" ? "PS" : "AFM";
-  if (pool.length === 0) {
-    return { ok: false, error: `No active associates are marked as ${label}. Check the Associates List.` };
-  }
-
   const [sy, sm] = ym.split("-").map(Number);
   const daysInMonth = new Date(sy, sm, 0).getDate();
-  const load = new Map<string, number>();
+
+  // Per-associate assignment count — used to keep rotation fair
+  const load = new Map<string, number>(pool.map((a) => [a.id, 0]));
 
   const rows: {
     assignment_date: string;
     role: AssignmentRole;
     slot_type: ShiftType;
-    associate_id: string | null;
+    associate_id: string;
   }[] = [];
 
   for (let d = 1; d <= daysInMonth; d++) {
@@ -244,13 +254,20 @@ export async function autoAssignMonthly(
     const wd = weekdayFromYmd(date);
     const slotType = defaultSlotTypeForDate(date);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const eligible = pool.filter((a: any) =>
-      canAssignRole(a as { id: string; shift_type: ShiftType; is_active: boolean }, wd)
-    );
-    const candidates = eligible.length > 0 ? eligible : pool;
-    const picked = pickBalanced(candidates, load) ?? pool[0].id;
+    // STRICT: only associates whose shift_type allows this weekday
+    const eligible = pool.filter((a) => canAssignRole(a, wd));
+
+    // If nobody is eligible for this day, skip — leave the cell blank
+    if (eligible.length === 0) continue;
+
+    const picked = pickBalanced(eligible, load);
+    if (!picked) continue;
+
     rows.push({ assignment_date: date, role, slot_type: slotType, associate_id: picked });
+  }
+
+  if (rows.length === 0) {
+    return { ok: false, error: `No eligible days found for ${label} pool this month.` };
   }
 
   const { error: upsertErr } = await supabase
