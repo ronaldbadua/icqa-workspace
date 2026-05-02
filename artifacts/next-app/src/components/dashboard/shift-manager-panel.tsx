@@ -17,6 +17,7 @@ import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 import { addMonths, parseYm, toYm } from "@/lib/week";
 import {
   canAssignPooling,
+  canAssignRole,
   canAssignShift,
   defaultSlotTypeForDate,
   SLOT_TYPES,
@@ -260,9 +261,28 @@ export function ShiftManagerPanel({
                   const mainId = mainRow?.associate_id ?? "";
                   const mainOpts = eligibleOptions(date, slot, "main", []);
 
+                  const afmRow = byAssign.get(`${date}::afm`);
+                  const psRow  = byAssign.get(`${date}::ps`);
+                  const afmId  = afmRow?.associate_id ?? "";
+                  const psId   = psRow?.associate_id  ?? "";
+
+                  // AFM candidates: is_afm=true, eligible by shift-day
+                  const afmOpts = associates.filter((a) => {
+                    if (!(a as unknown as { is_afm?: boolean }).is_afm) return false;
+                    const wd = weekdayFromYmd(date);
+                    return canAssignRole(a, wd);
+                  });
+                  // PS candidates: is_ps=true, eligible by shift-day
+                  const psOpts = associates.filter((a) => {
+                    if (!(a as unknown as { is_ps?: boolean }).is_ps) return false;
+                    const wd = weekdayFromYmd(date);
+                    return canAssignRole(a, wd);
+                  });
+
                   return (
                     <div key={date} className="min-h-[120px] rounded-lg border border-slate-200/80 bg-slate-50/40 p-2 text-left">
                       <p className="text-lg font-bold text-slate-800 leading-none">{parseInt(date.split("-")[2], 10)}</p>
+                      {/* Main */}
                       <div className="mt-1">
                         <select
                           className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-slate-800 focus:outline-none"
@@ -276,6 +296,40 @@ export function ShiftManagerPanel({
                           ))}
                         </select>
                       </div>
+                      {/* AFM row */}
+                      {afmOpts.length > 0 ? (
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className="shrink-0 rounded bg-sky-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-sky-700">AFM</span>
+                          <select
+                            className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-sky-800 focus:outline-none"
+                            value={afmId}
+                            disabled={pending}
+                            onChange={(e) => onSlotOrAssign(date, "afm", slot, e.target.value || null)}
+                          >
+                            <option value="">—</option>
+                            {afmOpts.map((a) => (
+                              <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
+                      {/* PS row */}
+                      {psOpts.length > 0 ? (
+                        <div className="mt-1 flex items-center gap-1">
+                          <span className="shrink-0 rounded bg-emerald-100 px-1 py-0.5 text-[0.6rem] font-bold uppercase text-emerald-700">PS</span>
+                          <select
+                            className="w-full appearance-none cursor-pointer bg-transparent px-0 py-0.5 text-[0.7rem] text-emerald-800 focus:outline-none"
+                            value={psId}
+                            disabled={pending}
+                            onChange={(e) => onSlotOrAssign(date, "ps", slot, e.target.value || null)}
+                          >
+                            <option value="">—</option>
+                            {psOpts.map((a) => (
+                              <option key={a.id} value={a.id}>{loginMap[a.id] || a.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}
