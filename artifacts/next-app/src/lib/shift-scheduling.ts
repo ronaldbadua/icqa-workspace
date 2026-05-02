@@ -104,6 +104,7 @@ const SHIFT_DAYS: Record<string, number[]> = {
   BHD: [3, 4, 5, 6],
   "Part Time": [0, 6],
   "Donut Shift": [0, 1, 2, 3, 4, 5, 6],
+  "Flex": [1, 2, 4, 5],
 };
 
 export function canAssignRole(associate: AssociateLike, weekday: number): boolean {
