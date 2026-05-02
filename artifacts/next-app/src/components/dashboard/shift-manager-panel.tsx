@@ -82,6 +82,19 @@ export function ShiftManagerPanel({
     () => Object.fromEntries(associates.map((a) => [a.id, a.is_ps ?? false]))
   );
 
+  // Controlled state for associates list fields
+  const [loginEdits, setLoginEdits] = useState<Record<string, string>>(
+    () => Object.fromEntries(associates.map((a) => [a.id, loginMap[a.id] ?? ""]))
+  );
+  const [shiftEdits, setShiftEdits] = useState<Record<string, ShiftType>>(
+    () => Object.fromEntries(associates.map((a) => [a.id, a.shift_type]))
+  );
+  const [activeEdits, setActiveEdits] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(associates.map((a) => [a.id, a.is_active]))
+  );
+
+  const [savePending, startSaveTransition] = useTransition();
+
   const toggleAfm = (id: string) => {
     const next = !afmMap[id];
     setAfmMap((prev) => ({ ...prev, [id]: next }));
@@ -423,7 +436,7 @@ export function ShiftManagerPanel({
                   <th className="px-4 py-2">Log In</th>
                   <th className="px-4 py-2 text-center">AFM</th>
                   <th className="px-4 py-2 text-center">PS</th>
-                  <th className="px-4 py-2">Shift type</th>
+                  <th className="px-4 py-2">Shift Type</th>
                   <th className="px-4 py-2">Active</th>
                   <th className="px-4 py-2" />
                 </tr>
@@ -440,9 +453,9 @@ export function ShiftManagerPanel({
                   <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="px-4 py-2">
                       <input
-                        id={`login-${a.id}`}
                         type="text"
-                        defaultValue={loginMap[a.id] ?? ""}
+                        value={loginEdits[a.id] ?? ""}
+                        onChange={(e) => setLoginEdits((prev) => ({ ...prev, [a.id]: e.target.value }))}
                         placeholder="Enter login"
                         className="w-full max-w-xs rounded border border-slate-200 px-2 py-1 text-sm focus:border-sky-400 focus:outline-none"
                       />
@@ -487,9 +500,9 @@ export function ShiftManagerPanel({
                     </td>
                     <td className="px-4 py-2">
                       <select
-                        id={`shift-${a.id}`}
-                        defaultValue={a.shift_type}
-                        className="rounded border border-slate-200 px-2 py-1"
+                        value={shiftEdits[a.id] ?? a.shift_type}
+                        onChange={(e) => setShiftEdits((prev) => ({ ...prev, [a.id]: e.target.value as ShiftType }))}
+                        className="rounded border border-slate-200 px-2 py-1 text-sm"
                       >
                         {SLOT_TYPES.map((s) => (
                           <option key={s} value={s}>{s}</option>
@@ -497,12 +510,16 @@ export function ShiftManagerPanel({
                       </select>
                     </td>
                     <td className="px-4 py-2">
-                      <input type="checkbox" defaultChecked={a.is_active} id={`active-${a.id}`} />
+                      <input
+                        type="checkbox"
+                        checked={activeEdits[a.id] ?? a.is_active}
+                        onChange={(e) => setActiveEdits((prev) => ({ ...prev, [a.id]: e.target.checked }))}
+                      />
                     </td>
-                    <td className="px-4 py-2 text-right whitespace-nowrap">
+                    <td className="px-4 py-2 text-right">
                       <button
                         type="button"
-                        className="text-rose-600 hover:underline"
+                        className="text-rose-600 hover:underline text-sm"
                         disabled={pending}
                         onClick={() => {
                           setError(null);
@@ -516,34 +533,50 @@ export function ShiftManagerPanel({
                       >
                         Delete
                       </button>
-                      <button
-                        type="button"
-                        className="ml-2 text-sky-700 hover:underline"
-                        disabled={pending}
-                        onClick={() => {
-                          const login = (document.getElementById(`login-${a.id}`) as HTMLInputElement).value;
-                          const shift_type = (document.getElementById(`shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
-                          const is_active = (document.getElementById(`active-${a.id}`) as HTMLInputElement).checked;
-                          setError(null);
-                          startTransition(async () => {
-                            const [assocRes, loginRes] = await Promise.all([
-                              updateAssociate({ id: a.id, name: a.name, shift_type, is_active }),
-                              saveAssociateLogin(a.id, login),
-                            ]);
-                            if (!assocRes.ok) setError(assocRes.error);
-                            else if (!loginRes.ok) setError(loginRes.error);
-                            else { setSuccess("Saved."); setTimeout(() => setSuccess(null), 2500); router.refresh(); }
-                          });
-                        }}
-                      >
-                        Save
-                      </button>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {/* Centralized Save button */}
+          {associates.length > 0 && (
+            <div className="flex items-center justify-between border-t border-slate-200/60 bg-slate-50/60 px-4 py-3">
+              <p className="text-xs text-slate-400">Changes update instantly · Click Save to sync all to Supabase</p>
+              <button
+                type="button"
+                disabled={savePending || !hasSupabase}
+                onClick={() => {
+                  setError(null);
+                  setSuccess(null);
+                  startSaveTransition(async () => {
+                    const results = await Promise.all(
+                      associates.map((a) =>
+                        Promise.all([
+                          updateAssociate({
+                            id: a.id,
+                            name: a.name,
+                            shift_type: shiftEdits[a.id] ?? a.shift_type,
+                            is_active: activeEdits[a.id] ?? a.is_active,
+                          }),
+                          saveAssociateLogin(a.id, loginEdits[a.id] ?? ""),
+                        ])
+                      )
+                    );
+                    const firstErr = results.flat().find((r) => !r.ok);
+                    if (firstErr && !firstErr.ok) { setError(firstErr.error); return; }
+                    setSuccess("All changes saved.");
+                    setTimeout(() => setSuccess(null), 3000);
+                    router.refresh();
+                  });
+                }}
+                className="rounded-lg bg-sky-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-700 active:scale-95 disabled:opacity-50 transition-all"
+              >
+                {savePending ? "Saving…" : "Save All"}
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
 
