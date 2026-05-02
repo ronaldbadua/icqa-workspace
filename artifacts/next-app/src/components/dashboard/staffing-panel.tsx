@@ -213,20 +213,6 @@ export function StaffingPanel({
         </button>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          { label: "Active", value: active, color: "bg-emerald-50 border-emerald-200 text-emerald-700" },
-          { label: "Called Out", value: calledOut, color: "bg-rose-50 border-rose-200 text-rose-700" },
-          { label: "On Leave", value: onLeave, color: "bg-amber-50 border-amber-200 text-amber-700" },
-          { label: "Training", value: training, color: "bg-sky-50 border-sky-200 text-sky-700" },
-        ].map(({ label, value, color }) => (
-          <div key={label} className={`rounded-xl border-2 p-4 ${color}`}>
-            <p className="text-2xl font-bold">{value}</p>
-            <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{label}</p>
-          </div>
-        ))}
-      </div>
 
       {/* Add form */}
       {showAdd && (
