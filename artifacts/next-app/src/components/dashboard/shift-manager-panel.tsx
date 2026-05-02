@@ -313,9 +313,6 @@ export function ShiftManagerPanel({
                           ))}
                         </select>
                       </div>
-                      {afmId && loginMap[afmId] ? (
-                        <p className="mt-0.5 truncate pl-1 text-[0.6rem] text-slate-400">{loginMap[afmId]}</p>
-                      ) : null}
                     </div>
                   );
                 })}
@@ -368,9 +365,6 @@ export function ShiftManagerPanel({
                           ))}
                         </select>
                       </div>
-                      {psId && loginMap[psId] ? (
-                        <p className="mt-0.5 truncate pl-1 text-[0.6rem] text-slate-400">{loginMap[psId]}</p>
-                      ) : null}
                     </div>
                   );
                 })}
