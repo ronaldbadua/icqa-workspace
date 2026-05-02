@@ -9,7 +9,6 @@ import {
   updateAssociate,
   updateAssociateRole,
   upsertAssignment,
-  upsertPoolingRule,
 } from "@/app/actions/scheduling";
 import { saveAssociateLogin } from "@/app/actions/associate-table";
 import type { AssociateRow, MonthlyAssignmentRow, PoolingRuleRow } from "@/lib/data/queries";
@@ -26,8 +25,7 @@ import {
 import { ConfigBanner } from "@/components/dashboard/config-banner";
 import { FormLabel } from "@/components/dashboard/status-pill";
 
-type TabId = "shift" | "associates" | "pooling";
-const POOLING_SHIFT_TYPES: ShiftType[] = ["FHD", "BHD", "Part Time"];
+type TabId = "shift" | "associates";
 
 function buildWeeks(days: { date: string; weekday: number; label: string }[]) {
   if (!days.length) return [] as ({ date: string; weekday: number; label: string } | null)[][];
@@ -150,7 +148,6 @@ export function ShiftManagerPanel({
 
   const leftTabs: { id: TabId; label: string }[] = [
     { id: "shift", label: "Shift Scheduling" },
-    { id: "pooling", label: "Pooling" },
   ];
 
   return (
@@ -519,110 +516,6 @@ export function ShiftManagerPanel({
         </div>
       ) : null}
 
-      {tab === "pooling" ? (
-        <div className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200/80 px-4 py-3">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Pooling rules</h3>
-                <p className="text-xs text-slate-500">Set shift type and available workdays for pooling assignments.</p>
-              </div>
-              <button
-                type="button"
-                disabled={pending}
-                className="rounded-lg bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
-                onClick={() => {
-                  setError(null);
-                  setSuccess(null);
-                  startTransition(async () => {
-                    for (const a of associates) {
-                      const shift_type = (document.getElementById(`pool-shift-${a.id}`) as HTMLSelectElement).value as ShiftType;
-                      const assocRes = await updateAssociate({
-                        id: a.id,
-                        name: a.name,
-                        shift_type,
-                        is_active: a.is_active,
-                      });
-                      if (!assocRes.ok) { setError(assocRes.error); return; }
-                      const ruleRes = await upsertPoolingRule({
-                        associate_id: a.id,
-                        allow_sunday: (document.getElementById(`sun-${a.id}`) as HTMLInputElement).checked,
-                        allow_monday: (document.getElementById(`mon-${a.id}`) as HTMLInputElement).checked,
-                        allow_tuesday: (document.getElementById(`tue-${a.id}`) as HTMLInputElement).checked,
-                        allow_wednesday: (document.getElementById(`wed-${a.id}`) as HTMLInputElement).checked,
-                        allow_thursday: (document.getElementById(`thu-${a.id}`) as HTMLInputElement).checked,
-                        allow_friday: (document.getElementById(`fri-${a.id}`) as HTMLInputElement).checked,
-                        allow_saturday: (document.getElementById(`sat-${a.id}`) as HTMLInputElement).checked,
-                      });
-                      if (!ruleRes.ok) { setError(ruleRes.error); return; }
-                    }
-                    setSuccess("All pooling rules saved.");
-                    router.refresh();
-                  });
-                }}
-              >
-                {pending ? "Saving…" : "Save"}
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase text-slate-500">
-                  <tr>
-                    <th className="px-4 py-2">Associate</th>
-                    <th className="px-4 py-2">Shift type</th>
-                    <th className="px-4 py-2">Sunday</th>
-                    <th className="px-4 py-2">Monday</th>
-                    <th className="px-4 py-2">Tuesday</th>
-                    <th className="px-4 py-2">Wednesday</th>
-                    <th className="px-4 py-2">Thursday</th>
-                    <th className="px-4 py-2">Friday</th>
-                    <th className="px-4 py-2">Saturday</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/80">
-                  {associates.map((a) => {
-                    const r = ruleByAssoc.get(a.id);
-                    return (
-                      <tr key={a.id}>
-                        <td className="px-4 py-2 font-medium text-slate-800">{loginMap[a.id] || a.name}</td>
-                        <td className="px-4 py-2">
-                          <select id={`pool-shift-${a.id}`} defaultValue={a.shift_type} className="rounded border border-slate-200 px-2 py-1">
-                            {POOLING_SHIFT_TYPES.map((s) => (
-                              <option key={s} value={s}>{s}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_sunday} id={`sun-${a.id}`} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_monday} id={`mon-${a.id}`} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_tuesday} id={`tue-${a.id}`} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_wednesday} id={`wed-${a.id}`} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_thursday} id={`thu-${a.id}`} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_friday} id={`fri-${a.id}`} />
-                        </td>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" className="w-10 h-10 cursor-pointer accent-sky-600" defaultChecked={r?.allow_saturday} id={`sat-${a.id}`} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-        </div>
-      ) : null}
 
     </div>
   );
