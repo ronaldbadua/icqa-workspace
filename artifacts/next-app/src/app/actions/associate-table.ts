@@ -11,6 +11,8 @@ export type AssociatePScore = {
   p2: string;
   p3: string;
   login: string;
+  band?: string;
+  shift_days?: string;
 };
 
 export async function getAssociatePScores(): Promise<{ data: AssociatePScore[]; error: string | null }> {
@@ -20,7 +22,7 @@ export async function getAssociatePScores(): Promise<{ data: AssociatePScore[]; 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from("associate_p_scores")
-    .select("associate_id, p1, p2, p3, login");
+    .select("associate_id, p1, p2, p3, login, band, shift_days");
 
   if (error) return { data: [], error: (error as { message: string }).message };
   return { data: (data ?? []) as AssociatePScore[], error: null };
@@ -40,7 +42,30 @@ export async function saveAssociatePScores(
   if (error) return { ok: false, error: error.message };
   revalidatePath("/associate-table");
   revalidatePath("/process-path");
-  revalidatePath("/hourly-notes");
+  return { ok: true };
+}
+
+export async function updateAssociateNames(
+  updates: { id: string; name: string }[]
+): Promise<ActionResult> {
+  if (!updates.length) return { ok: true };
+  const supabase = createAdminSupabaseClient() ?? await createServerSupabaseClient();
+  if (!supabase) return { ok: false, error: "Supabase is not configured." };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = supabase as any;
+  for (const u of updates) {
+    const trimmed = u.name.trim();
+    if (!trimmed) continue;
+    const { error } = await db
+      .from("associates")
+      .update({ name: trimmed })
+      .eq("id", u.id);
+    if (error) return { ok: false, error: error.message };
+  }
+  revalidatePath("/process-path");
+  revalidatePath("/scheduling");
+  revalidatePath("/associate-table");
   return { ok: true };
 }
 
@@ -76,6 +101,5 @@ export async function saveAssociateLogin(
   if (error) return { ok: false, error: error.message };
   revalidatePath("/scheduling");
   revalidatePath("/associate-table");
-  revalidatePath("/hourly-notes");
   return { ok: true };
 }
