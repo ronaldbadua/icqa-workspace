@@ -6,6 +6,7 @@ import type { AssignmentRole, ShiftType } from "@/lib/supabase/database.types";
 import {
   canAssignPooling,
   canAssignShift,
+  canAssignRole,
   defaultSlotTypeForDate,
   SLOT_TYPES,
   weekdayFromYmd,
@@ -200,7 +201,8 @@ export async function autoAssignMonthly(
 
   const [{ data: associates, error: assocErr }, { data: rules, error: ruleErr }] =
     await Promise.all([
-      supabase.from("associates").select("id, name, shift_type, is_active").eq("is_active", true),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from("associates").select("id, name, shift_type, is_active, is_afm, is_ps").eq("is_active", true),
       supabase
         .from("pooling_rules")
         .select(
@@ -212,7 +214,7 @@ export async function autoAssignMonthly(
     return { ok: false, error: assocErr?.message ?? ruleErr?.message ?? "Failed to load data." };
   }
 
-  const active = (associates ?? []).filter((a) => a.shift_type !== "Vacation");
+  const active = (associates ?? []).filter((a: { shift_type: string }) => a.shift_type !== "Vacation");
   if (active.length === 0) {
     return { ok: false, error: "Add at least one active associate who is not on Vacation." };
   }
@@ -234,8 +236,11 @@ export async function autoAssignMonthly(
     days.push({ date, weekday: wd, slotType: defaultSlotTypeForDate(date) });
   }
 
-  const rulesByAssociate = new Map((rules ?? []).map((r) => [r.associate_id, r]));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rulesByAssociate = new Map((rules ?? []).map((r: any) => [r.associate_id, r]));
   const mainLoad = new Map<string, number>();
+  const afmLoad = new Map<string, number>();
+  const psLoad = new Map<string, number>();
 
   const rows: {
     assignment_date: string;
@@ -249,20 +254,37 @@ export async function autoAssignMonthly(
     "allow_thursday", "allow_friday", "allow_saturday",
   ] as const;
 
+  // Eligible AFM / PS pools (those with the flag set and active)
+  const afmPool = active.filter((a: { is_afm: boolean }) => a.is_afm);
+  const psPool  = active.filter((a: { is_ps: boolean })  => a.is_ps);
+
   for (const day of days) {
     const dayFlagKey = DAY_FLAG_KEYS[day.weekday];
 
-    // Tier 1: associates who have this specific day checked in Pooling rules
-    let pool = active.filter((a) => rulesByAssociate.get(a.id)?.[dayFlagKey] === true);
-
-    // Tier 2: if nobody has that day checked, fall back to entire active list
-    // This guarantees EVERY day — including Sundays & Saturdays — is always filled
+    // ── Main assignment ──────────────────────────────────────────────
+    let pool = active.filter((a: { id: string }) => rulesByAssociate.get(a.id)?.[dayFlagKey] === true);
     if (pool.length === 0) pool = active.slice();
-
-    // Hard guarantee: pick someone (extra safety net)
     const picked = pickBalanced(pool, mainLoad) ?? active[0].id;
-
     rows.push({ assignment_date: day.date, role: "main", slot_type: day.slotType, associate_id: picked });
+
+    // ── AFM assignment ───────────────────────────────────────────────
+    if (afmPool.length > 0) {
+      // Filter by shift-day eligibility
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const eligible = afmPool.filter((a: any) => canAssignRole(a as { id: string; shift_type: ShiftType; is_active: boolean }, day.weekday));
+      const afmPool2 = eligible.length > 0 ? eligible : afmPool;
+      const afmPicked = pickBalanced(afmPool2, afmLoad) ?? afmPool[0].id;
+      rows.push({ assignment_date: day.date, role: "afm", slot_type: day.slotType, associate_id: afmPicked });
+    }
+
+    // ── PS assignment ────────────────────────────────────────────────
+    if (psPool.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const eligible = psPool.filter((a: any) => canAssignRole(a as { id: string; shift_type: ShiftType; is_active: boolean }, day.weekday));
+      const psPool2 = eligible.length > 0 ? eligible : psPool;
+      const psPicked = pickBalanced(psPool2, psLoad) ?? psPool[0].id;
+      rows.push({ assignment_date: day.date, role: "ps", slot_type: day.slotType, associate_id: psPicked });
+    }
   }
 
   const { error: upsertErr } = await supabase.from("monthly_assignments").upsert(rows, { onConflict: "assignment_date,role" });
