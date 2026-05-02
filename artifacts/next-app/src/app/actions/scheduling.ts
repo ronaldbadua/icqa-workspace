@@ -463,7 +463,18 @@ export async function autoAssignPsBoth(
     // No PS associates available on Sundays — leave blank
     if (wd === 0) continue;
 
-    const eligible = pool.filter((a) => canAssignRole(a, wd));
+    // Strict per-name day overrides — enforced regardless of DB shift_type.
+    // weekdays: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+    const PS_NAME_OVERRIDES: Record<string, number[]> = {
+      esahafni: [1, 2, 4, 5], // Mon/Tue/Thu/Fri only
+    };
+
+    const eligible = pool.filter((a) => {
+      const name = ((a as unknown as { name?: string }).name ?? "").toLowerCase().trim();
+      const override = PS_NAME_OVERRIDES[name];
+      if (override) return override.includes(wd);
+      return canAssignRole(a, wd);
+    });
     if (eligible.length === 0) continue;
 
     // ── Pick PS ───────────────────────────────────────────────────────────
