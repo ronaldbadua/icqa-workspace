@@ -446,6 +446,9 @@ export async function autoAssignPsBoth(
     const wd = weekdayFromYmd(date);
     const slotType = defaultSlotTypeForDate(date);
 
+    // No PS associates available on Sundays — leave blank
+    if (wd === 0) continue;
+
     const eligible = pool.filter((a) => canAssignRole(a, wd));
     if (eligible.length === 0) continue;
 
