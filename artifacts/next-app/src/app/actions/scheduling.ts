@@ -249,6 +249,8 @@ export async function autoAssignMonthly(
     associate_id: string;
   }[] = [];
 
+  let lastPickedId: string | null = null;
+
   for (let d = 1; d <= daysInMonth; d++) {
     const date = `${sy}-${String(sm).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
     const wd = weekdayFromYmd(date);
@@ -260,9 +262,14 @@ export async function autoAssignMonthly(
     // If nobody is eligible for this day, skip — leave the cell blank
     if (eligible.length === 0) continue;
 
-    const picked = pickBalanced(eligible, load);
+    // Prefer someone who was NOT assigned the previous calendar day (no back-to-back repeats)
+    const preferred = eligible.filter((a) => a.id !== lastPickedId);
+    const candidates = preferred.length > 0 ? preferred : eligible;
+
+    const picked = pickBalanced(candidates, load);
     if (!picked) continue;
 
+    lastPickedId = picked;
     rows.push({ assignment_date: date, role, slot_type: slotType, associate_id: picked });
   }
 
