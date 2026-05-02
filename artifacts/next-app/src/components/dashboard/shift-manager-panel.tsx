@@ -149,6 +149,73 @@ export function ShiftManagerPanel({
     });
   };
 
+  const handleSaveSchedule = () => {
+    if (!hasSupabase) { setError("Configure Supabase to save."); return; }
+    setError(null);
+    setSuccess("Schedule saved to Supabase. ✓");
+    setTimeout(() => setSuccess(null), 3000);
+    router.refresh();
+  };
+
+  const handlePrint = () => {
+    const monthLabel = parseYm(ym).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    const isPS = tab === "ps";
+    const primaryRole: AssignmentRole = isPS ? "ps" : "afm";
+    const supportRole: AssignmentRole = isPS ? "ps_support" : "afm_support";
+    const tabLabel = isPS ? "PS Monthly Schedule" : "AFM Monthly Schedule";
+
+    const dayHeaders = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+      .map((d) => `<th style="padding:6px 4px;text-align:center;font-size:11px;background:#f5f5f5;border:1px solid #ddd;">${d}</th>`)
+      .join("");
+
+    const rows = weeks
+      .map((week) => {
+        const cells = week
+          .map((cell) => {
+            if (!cell) return `<td style="background:#fafafa;border:1px solid #eee;padding:4px;min-height:70px;"></td>`;
+            const pRow = byAssign.get(`${cell.date}::${primaryRole}`);
+            const sRow = byAssign.get(`${cell.date}::${supportRole}`);
+            const pName = pRow ? (associates.find((a) => a.id === pRow.associate_id)?.name ?? "—") : "—";
+            const sName = sRow ? (associates.find((a) => a.id === sRow.associate_id)?.name ?? "—") : "—";
+            const dayNum = parseInt(cell.date.split("-")[2], 10);
+            const primaryBg = isPS ? "#d1fae5" : "#dbeafe";
+            const primaryColor = isPS ? "#065f46" : "#1e40af";
+            const badge = (label: string, bg: string, color: string) =>
+              `<span style="display:inline-block;padding:1px 6px;border-radius:9px;font-size:10px;font-weight:700;background:${bg};color:${color};margin-right:3px;">${label}</span>`;
+            return `<td style="vertical-align:top;border:1px solid #ddd;padding:5px;min-width:100px;">
+              <div style="font-weight:bold;font-size:13px;margin-bottom:5px;">${dayNum}</div>
+              <div style="margin-bottom:3px;">${badge(isPS ? "PS" : "AFM", primaryBg, primaryColor)}<span style="font-size:11px;">${pName}</span></div>
+              <div>${badge("SUP", "#a7f3d0", "#065f46")}<span style="font-size:11px;">${sName}</span></div>
+            </td>`;
+          })
+          .join("");
+        return `<tr>${cells}</tr>`;
+      })
+      .join("");
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+      <title>${tabLabel} — ${monthLabel}</title>
+      <style>
+        body{font-family:Arial,sans-serif;margin:20px;color:#111;}
+        h1{font-size:16px;margin-bottom:2px;}
+        h2{font-size:12px;color:#555;font-weight:normal;margin-bottom:14px;}
+        table{border-collapse:collapse;width:100%;}
+        td,th{min-height:70px;}
+        @media print{body{margin:8mm;}@page{size:landscape;}}
+      </style>
+    </head><body>
+      <h1>ShiftManager — ${tabLabel}</h1>
+      <h2>${monthLabel}</h2>
+      <table><thead><tr>${dayHeaders}</tr></thead><tbody>${rows}</tbody></table>
+    </body></html>`;
+
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 400);
+  };
+
   const onAutoAssign = (role: "afm" | "afm_support" | "ps" | "afm_both") => {
     if (!hasSupabase) { setError("Configure Supabase to auto-assign."); return; }
     setError(null);
@@ -272,6 +339,25 @@ export function ShiftManagerPanel({
             >
               {pending ? "Generating…" : "Auto Assign Monthly"}
             </button>
+          ) : null}
+
+          {(tab === "shift" || tab === "ps") ? (
+            <>
+              <button
+                type="button"
+                onClick={handleSaveSchedule}
+                className="rounded-lg border border-sky-300 bg-sky-50 px-4 py-2 text-sm font-semibold text-sky-700 shadow-sm hover:bg-sky-100 transition"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={handlePrint}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 transition"
+              >
+                Print Preview
+              </button>
+            </>
           ) : null}
         </div>
       </div>
