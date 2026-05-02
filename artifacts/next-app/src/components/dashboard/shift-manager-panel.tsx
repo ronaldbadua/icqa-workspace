@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   addAssociate,
+  autoAssignAfmBoth,
   autoAssignMonthly,
   deleteAssociate,
   updateAssociate,
@@ -153,12 +154,8 @@ export function ShiftManagerPanel({
     setSuccess(null);
     startTransition(async () => {
       if (role === "afm_both") {
-        const [r1, r2] = await Promise.all([
-          autoAssignMonthly(ym, "afm"),
-          autoAssignMonthly(ym, "afm_support"),
-        ]);
-        if (!r1.ok) { setError(r1.error); return; }
-        if (!r2.ok) { setError(r2.error); return; }
+        const r = await autoAssignAfmBoth(ym);
+        if (!r.ok) { setError(r.error); return; }
         setSuccess(`AFM & AFM Support schedules generated for ${ym}.`);
       } else {
         const res = await autoAssignMonthly(ym, role);
